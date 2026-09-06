@@ -27,7 +27,7 @@ class LintConfig:
             exclude=_as_str_tuple(payload.get("exclude")),
             select=_as_upper_tuple(payload.get("select")),
             ignore=_as_upper_tuple(payload.get("ignore")),
-            allow_noqa=bool(payload.get("allow_noqa", True)),
+            allow_noqa=_as_bool(payload.get("allow_noqa", True), field_name="allow_noqa"),
             noqa_allowed=_as_upper_tuple(payload.get("noqa_allowed")),
             noqa_forbidden=_as_upper_tuple(payload.get("noqa_forbidden")),
             rule_modules=_as_str_tuple(payload.get("rule_modules")),
@@ -102,3 +102,9 @@ def _as_str_tuple(value: Any) -> tuple[str, ...]:
 
 def _as_upper_tuple(value: Any) -> tuple[str, ...]:
     return tuple(item.upper() for item in _as_str_tuple(value))
+
+
+def _as_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise TypeError(f"{field_name} must be a boolean, got {type(value).__name__}")

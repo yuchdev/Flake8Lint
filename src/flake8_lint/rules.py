@@ -451,7 +451,6 @@ def _check_none_return_annotation(context: RuleContext) -> Iterable[RuleViolatio
 
 def _check_percent_formatting(context: RuleContext) -> Iterable[RuleViolation]:
     percent_pattern = r"%(?:\(\w+\))?[-#0 +]*\d*(?:\.\d+)?[hlL]?[diouxXeEfFgGcrs]"
-    logging_methods = {"debug", "info", "warning", "error", "exception", "critical", "log"}
 
     def has_percent_placeholders(value: str) -> bool:
         return bool(re.search(percent_pattern, value))
@@ -471,26 +470,6 @@ def _check_percent_formatting(context: RuleContext) -> Iterable[RuleViolation]:
                 "Do not use old-style '%' string formatting (e.g. '%s', '%d'); "
                 "use f-strings instead.",
             )
-            continue
-
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in logging_methods
-            and node.args
-        ):
-            first = node.args[0]
-            if (
-                isinstance(first, ast.Constant)
-                and isinstance(first.value, str)
-                and has_percent_placeholders(first.value)
-            ):
-                yield _violation(
-                    context,
-                    node,
-                    "X009",
-                    "Do not use old-style % formatting in logging calls; use f-strings instead.",
-                )
 
 
 def _except_catches_import_error(handler: ast.ExceptHandler) -> bool:

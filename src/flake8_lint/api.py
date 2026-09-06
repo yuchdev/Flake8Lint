@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import io
 import json
+import tokenize
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -183,10 +185,9 @@ def _is_noqa_suppressed(
 
 
 def _parse_noqa_codes(line: str) -> frozenset[str] | None:
-    marker = "#"
-    if marker not in line:
+    comment = _extract_comment(line)
+    if comment is None:
         return None
-    comment = line.split(marker, 1)[1].strip()
     lowered = comment.lower()
     if not lowered.startswith("noqa"):
         return None
@@ -201,3 +202,13 @@ def _parse_noqa_codes(line: str) -> frozenset[str] | None:
             continue
         cleaned_codes.append(cleaned.split()[0].upper())
     return frozenset(cleaned_codes)
+
+
+def _extract_comment(line: str) -> str | None:
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(line).readline):
+            if token.type == tokenize.COMMENT:
+                return token.string.removeprefix("#").strip()
+    except tokenize.TokenError:
+        return None
+    return None
