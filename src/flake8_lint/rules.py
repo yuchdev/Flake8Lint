@@ -349,8 +349,8 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X006",
-                        "Do not use local imports inside function bodies; move "
-                        "imports to module scope.",
+                        "Do not use local imports inside function or class "
+                        "bodies; move imports to module scope.",
                     )
                 )
 
@@ -361,8 +361,8 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X006",
-                        "Do not use local imports inside function bodies; move "
-                        "imports to module scope.",
+                        "Do not use local imports inside function or class "
+                        "bodies; move imports to module scope.",
                     )
                 )
 
@@ -373,8 +373,9 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X006",
-                        "Do not use local imports inside function bodies; move "
-                        "imports to module scope (including __import__() calls).",
+                        "Do not use local imports inside function or class "
+                        "bodies; move imports to module scope (including "
+                        "__import__() calls).",
                     )
                 )
             self.generic_visit(node)

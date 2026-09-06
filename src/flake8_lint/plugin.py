@@ -1,4 +1,9 @@
-"""Thin Flake8 adapter for built-in flake8-lint rules."""
+"""Thin Flake8 adapter for built-in flake8-lint rules.
+
+Task 0001 keeps installed external rule-provider discovery authoritative in the
+standalone engine and CLI. The Flake8 adapter intentionally caches only the
+built-in registry in this scaffold.
+"""
 
 from __future__ import annotations
 

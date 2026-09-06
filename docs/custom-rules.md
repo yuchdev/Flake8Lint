@@ -57,6 +57,11 @@ Reusable provider packages should expose an entry point in the `flake8_lint.rule
 my_rules = "my_rules_package:register_rules"
 ```
 
+In the 1.0.0 scaffold, installed providers are discovered by the standalone
+engine, CLI, and explicit pytest helper. The thin Flake8 adapter intentionally
+remains built-in-only until provider loading through that integration is
+specified and tested.
+
 ## select/ignore interaction
 
 `select` and `ignore` apply equally to built-in and custom codes. `ignore` wins when both match.
@@ -71,4 +76,8 @@ Prefer unit tests around `check_tree()`, `check_file()`, `lint_paths()`, and reg
 
 ## Compatibility and versioning
 
-Task 0001 establishes the extension surface. Task 0002 will harden the implementation details and validate documented examples against the first working release.
+The 1.0.0 scaffold establishes the extension surface: rule registration is
+explicit, duplicate codes are errors, and all providers share `RuleContext`,
+`RuleViolation`, and the same select/ignore/noqa engine semantics. Future
+releases may extend provider-loading behavior, but documented public contracts
+must remain backward compatible or be versioned explicitly.
