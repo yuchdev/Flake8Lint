@@ -65,6 +65,11 @@ def check_tree(
     config: LintConfig | None = None,
     registry=None,
 ) -> tuple[RuleViolation, ...]:
+    """Run the resolved rule registry over a parsed module.
+
+    Callers may pass a pre-resolved *registry* to control provider loading and
+    avoid repeated discovery work across multiple files.
+    """
     from .registry import resolve_registry
 
     effective_config = config or LintConfig()
@@ -99,6 +104,11 @@ def check_file(
     config: LintConfig | None = None,
     registry=None,
 ) -> tuple[RuleViolation, ...]:
+    """Parse a Python file and run the resolved registry against it.
+
+    Callers may pass a pre-resolved *registry* to reuse provider discovery
+    across repeated file checks.
+    """
     file_path = Path(path)
     source = file_path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(file_path))
@@ -111,6 +121,11 @@ def lint_paths(
     config: LintConfig | None = None,
     registry=None,
 ) -> LintResult:
+    """Discover Python files under *paths* and lint them.
+
+    Callers may pass a pre-resolved *registry* when linting many files to avoid
+    repeated provider-loading overhead.
+    """
     from .registry import resolve_registry
 
     effective_config = config or LintConfig()

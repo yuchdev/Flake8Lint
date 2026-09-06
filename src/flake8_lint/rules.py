@@ -380,34 +380,18 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
 
 
 def _function_returns_value(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    class Visitor(ast.NodeVisitor):
-        def __init__(self) -> None:
-            self.returns_value = False
-
-        def visit_Return(self, ret: ast.Return) -> None:
-            if ret.value is not None:
-                self.returns_value = True
-
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-            del node
-            return None
-
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-            del node
-            return None
-
-        def visit_Lambda(self, node: ast.Lambda) -> None:
-            del node
-            return None
-
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            del node
-            return None
-
-    visitor = Visitor()
-    for stmt in node.body:
-        visitor.visit(stmt)
-    return visitor.returns_value
+    queue: list[ast.AST] = list(node.body)
+    while queue:
+        current = queue.pop()
+        if isinstance(current, ast.Return) and current.value is not None:
+            return True
+        if isinstance(
+            current,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
+        ):
+            continue
+        queue.extend(ast.iter_child_nodes(current))
+    return False
 
 
 def _check_missing_return_annotation(context: RuleContext) -> Iterable[RuleViolation]:

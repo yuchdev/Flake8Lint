@@ -16,3 +16,19 @@ def test_builtin_rules_detect_known_samples() -> None:
     sample = Path(__file__).parent / "samples" / "broad_exception.py"
     violations = check_file(sample, config=LintConfig(select=("X002",)))
     assert [violation.code for violation in violations] == ["X002"]
+
+
+def test_x007_ignores_returns_inside_nested_classes(tmp_path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def outer():\n"
+        '    """Outer wrapper."""\n'
+        "    class Inner:\n"
+        '        """Inner class."""\n'
+        "        def method(self) -> int:\n"
+        '            """Return a value."""\n'
+        "            return 1\n",
+        encoding="utf-8",
+    )
+    violations = check_file(sample, config=LintConfig(select=("X007",)))
+    assert violations == ()

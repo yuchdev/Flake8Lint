@@ -50,11 +50,17 @@ class LintConfig:
             self,
             include=self.include if include is None else include,
             exclude=self.exclude if exclude is None else exclude,
-            select=self.select if select is None else select,
-            ignore=self.ignore if ignore is None else ignore,
+            select=self.select if select is None else _normalize_codes(select),
+            ignore=self.ignore if ignore is None else _normalize_codes(ignore),
             allow_noqa=self.allow_noqa if allow_noqa is None else allow_noqa,
-            noqa_allowed=self.noqa_allowed if noqa_allowed is None else noqa_allowed,
-            noqa_forbidden=self.noqa_forbidden if noqa_forbidden is None else noqa_forbidden,
+            noqa_allowed=(
+                self.noqa_allowed if noqa_allowed is None else _normalize_codes(noqa_allowed)
+            ),
+            noqa_forbidden=(
+                self.noqa_forbidden
+                if noqa_forbidden is None
+                else _normalize_codes(noqa_forbidden)
+            ),
             rule_modules=self.rule_modules if rule_modules is None else rule_modules,
         )
 
@@ -112,6 +118,10 @@ def _as_str_tuple(value: Any) -> tuple[str, ...]:
 
 def _as_upper_tuple(value: Any) -> tuple[str, ...]:
     return tuple(item.upper() for item in _as_str_tuple(value))
+
+
+def _normalize_codes(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(value.upper() for value in values)
 
 
 def _as_bool(value: Any, *, field_name: str) -> bool:

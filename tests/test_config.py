@@ -35,3 +35,9 @@ def test_config_rejects_non_sequence_include_values() -> None:
 def test_config_rejects_non_string_sequence_items() -> None:
     with pytest.raises(TypeError):
         LintConfig.from_mapping({"ignore": [1]})
+
+
+def test_merge_normalizes_code_prefixes() -> None:
+    merged = LintConfig().merge(select=("x0",), ignore=("x002",))
+    assert merged.select == ("X0",)
+    assert merged.ignore == ("X002",)

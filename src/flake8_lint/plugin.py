@@ -14,6 +14,7 @@ class ProjectRulesPlugin:
     name = "flake8-lint"
     version = __version__
     _config = LintConfig()
+    _registry = resolve_registry(include_entry_points=False)
 
     @classmethod
     def add_options(cls, option_manager) -> None:
@@ -27,7 +28,7 @@ class ProjectRulesPlugin:
 
     @classmethod
     def parse_options(cls, options) -> None:
-        select = _extract_x_codes(
+        select = _normalize_select_codes(
             getattr(options, "select", ()),
             getattr(options, "extend_select", ()),
         )
@@ -48,7 +49,6 @@ class ProjectRulesPlugin:
     def __init__(self, tree, filename: str = "<unknown>") -> None:
         self.tree = tree
         self.filename = filename
-        self._registry = resolve_registry(include_entry_points=False)
 
     def run(self):
         source = None
@@ -63,7 +63,7 @@ class ProjectRulesPlugin:
             self.filename,
             source,
             config=type(self)._config,
-            registry=self._registry,
+            registry=type(self)._registry,
         ):
             yield (
                 violation.lineno,
@@ -81,3 +81,11 @@ def _extract_x_codes(*groups) -> tuple[str, ...]:
             if upper.startswith("X") and upper not in codes:
                 codes.append(upper)
     return tuple(codes)
+
+
+def _normalize_select_codes(*groups) -> tuple[str, ...]:
+    raw_codes = [str(code).upper() for group in groups for code in (group or ())]
+    x_codes = _extract_x_codes(*groups)
+    if raw_codes and not x_codes:
+        return ("__FLAKE8_LINT_NO_MATCH__",)
+    return x_codes
