@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         config = _build_cli_config(args)
         result = lint_paths(tuple(Path(path) for path in args.paths), config=config)
     except Exception as exc:
-        print(f"flake8-lint: {exc}")
+        print(f"flake8-lint: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     output = format_json(result) if args.output_format == "json" else format_text(result)

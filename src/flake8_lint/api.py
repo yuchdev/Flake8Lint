@@ -138,7 +138,7 @@ def format_text(result: LintResult) -> str:
     return "\n".join(
         f"{violation.filename}:{violation.lineno}:{violation.col_offset}: "
         f"{violation.code} {violation.message}"
-        for violation in result.violations
+        for violation in _sorted_violations(result.violations)
     )
 
 
@@ -146,15 +146,15 @@ def format_json(result: LintResult) -> str:
     payload = {
         "ok": result.ok,
         "files_checked": result.files_checked,
-        "violations": [violation.__dict__ for violation in result.violations],
+        "violations": [violation.__dict__ for violation in _sorted_violations(result.violations)],
     }
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def _is_rule_enabled(code: str, config: LintConfig) -> bool:
-    if config.select and code not in config.select:
+    if config.select and not _matches_code_prefix(code, config.select):
         return False
-    if code in config.ignore:
+    if _matches_code_prefix(code, config.ignore):
         return False
     return True
 
@@ -212,3 +212,22 @@ def _extract_comment(line: str) -> str | None:
     except tokenize.TokenError:
         return None
     return None
+
+
+def _matches_code_prefix(code: str, prefixes: Sequence[str]) -> bool:
+    return any(code.startswith(prefix) for prefix in prefixes)
+
+
+def _sorted_violations(
+    violations: Sequence[RuleViolation],
+) -> list[RuleViolation]:
+    return sorted(
+        violations,
+        key=lambda violation: (
+            violation.filename,
+            violation.lineno,
+            violation.col_offset,
+            violation.code,
+            violation.message,
+        ),
+    )

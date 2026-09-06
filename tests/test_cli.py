@@ -23,3 +23,10 @@ def test_cli_check_json_reports_violation(tmp_path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert payload["violations"][0]["code"] == "X002"
+
+
+def test_cli_errors_are_reported_on_stderr(capsys) -> None:
+    assert main(["check", "--rule-module", "missing.module", "."]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("flake8-lint: ")

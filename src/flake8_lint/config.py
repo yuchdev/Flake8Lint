@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -97,7 +98,16 @@ def _as_str_tuple(value: Any) -> tuple[str, ...]:
         return ()
     if isinstance(value, str):
         return (value,)
-    return tuple(str(item) for item in value)
+    if not isinstance(value, Sequence):
+        raise TypeError(f"Expected a string or sequence of strings, got {type(value).__name__}")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError(
+                f"Expected every list item to be a string, got {type(item).__name__}"
+            )
+        items.append(item)
+    return tuple(items)
 
 
 def _as_upper_tuple(value: Any) -> tuple[str, ...]:

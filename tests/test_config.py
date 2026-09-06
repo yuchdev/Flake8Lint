@@ -25,3 +25,13 @@ def test_load_config_falls_back_to_legacy_tests_section(tmp_path) -> None:
 def test_config_rejects_non_boolean_allow_noqa() -> None:
     with pytest.raises(TypeError):
         LintConfig.from_mapping({"allow_noqa": "false"})
+
+
+def test_config_rejects_non_sequence_include_values() -> None:
+    with pytest.raises(TypeError):
+        LintConfig.from_mapping({"include": 1})
+
+
+def test_config_rejects_non_string_sequence_items() -> None:
+    with pytest.raises(TypeError):
+        LintConfig.from_mapping({"ignore": [1]})
