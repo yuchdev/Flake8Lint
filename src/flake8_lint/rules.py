@@ -337,6 +337,11 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
             self.generic_visit(node)
             self.depth -= 1
 
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            self.depth += 1
+            self.generic_visit(node)
+            self.depth -= 1
+
         def visit_Import(self, node: ast.Import) -> None:
             if self.depth > 0:
                 self.violations.append(
@@ -420,10 +425,11 @@ def _expr_is_none(expr: ast.expr | None) -> bool:
 
 def _check_none_return_annotation(context: RuleContext) -> Iterable[RuleViolation]:
     for node in ast.walk(context.tree):
-        if isinstance(
-            node,
-            (ast.FunctionDef, ast.AsyncFunctionDef),
-        ) and _expr_is_none(node.returns):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if _is_stub_body(node):
+            continue
+        if _expr_is_none(node.returns):
             yield _violation(
                 context,
                 node,
@@ -505,30 +511,29 @@ def _check_import_error_suppression(context: RuleContext) -> Iterable[RuleViolat
                 )
 
 
-def _is_union_with_none(annotation: ast.expr | None) -> bool:
-    if annotation is None:
+def _is_stub_body(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    if len(node.body) != 1:
         return False
-    found_none = False
-    found_union = False
-    for node in ast.walk(annotation):
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            found_union = True
-        if _expr_is_none(node):
-            found_none = True
-    return found_union and found_none
+    stmt = node.body[0]
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and stmt.value.value is Ellipsis
+    )
+
+
+def _is_union_with_none(annotation: ast.expr | None) -> bool:
+    if not _is_top_level_union(annotation):
+        return False
+    members = list(_iter_union_members(annotation))
+    return any(_expr_is_none(member) for member in members)
 
 
 def _is_union_without_none(annotation: ast.expr | None) -> bool:
-    if annotation is None:
+    if not _is_top_level_union(annotation):
         return False
-    found_none = False
-    found_union = False
-    for node in ast.walk(annotation):
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-            found_union = True
-        if _expr_is_none(node):
-            found_none = True
-    return found_union and not found_none
+    members = list(_iter_union_members(annotation))
+    return not any(_expr_is_none(member) for member in members)
 
 
 def _iter_annotations(tree: ast.AST) -> Iterable[ast.AST]:
@@ -549,6 +554,18 @@ def _iter_annotations(tree: ast.AST) -> Iterable[ast.AST]:
                 yield node.returns
         elif isinstance(node, ast.AnnAssign):
             yield node.annotation
+
+
+def _is_top_level_union(annotation: ast.expr | None) -> bool:
+    return isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr)
+
+
+def _iter_union_members(annotation: ast.expr) -> Iterable[ast.expr]:
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        yield from _iter_union_members(annotation.left)
+        yield from _iter_union_members(annotation.right)
+        return
+    yield annotation
 
 
 def _check_union_none_annotations(context: RuleContext) -> Iterable[RuleViolation]:

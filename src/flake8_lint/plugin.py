@@ -28,11 +28,11 @@ class ProjectRulesPlugin:
 
     @classmethod
     def parse_options(cls, options) -> None:
-        select = _normalize_select_codes(
+        select = _normalize_code_prefixes(
             getattr(options, "select", ()),
             getattr(options, "extend_select", ()),
         )
-        ignore = _extract_x_codes(
+        ignore = _normalize_code_prefixes(
             getattr(options, "ignore", ()),
             getattr(options, "extend_ignore", ()),
         )
@@ -73,19 +73,11 @@ class ProjectRulesPlugin:
             )
 
 
-def _extract_x_codes(*groups) -> tuple[str, ...]:
+def _normalize_code_prefixes(*groups) -> tuple[str, ...]:
     codes: list[str] = []
     for group in groups:
         for code in group or ():
             upper = str(code).upper()
-            if upper.startswith("X") and upper not in codes:
+            if upper not in codes:
                 codes.append(upper)
     return tuple(codes)
-
-
-def _normalize_select_codes(*groups) -> tuple[str, ...]:
-    raw_codes = [str(code).upper() for group in groups for code in (group or ())]
-    x_codes = _extract_x_codes(*groups)
-    if raw_codes and not x_codes:
-        return ("__FLAKE8_LINT_NO_MATCH__",)
-    return x_codes

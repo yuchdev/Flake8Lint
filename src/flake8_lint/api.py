@@ -181,9 +181,9 @@ def _is_noqa_suppressed(
 ) -> bool:
     if not config.allow_noqa or source is None:
         return False
-    if config.noqa_allowed and violation.code not in config.noqa_allowed:
+    if config.noqa_allowed and not _matches_code_prefix(violation.code, config.noqa_allowed):
         return False
-    if violation.code in config.noqa_forbidden:
+    if _matches_code_prefix(violation.code, config.noqa_forbidden):
         return False
 
     lines = source.splitlines()
