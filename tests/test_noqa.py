@@ -70,3 +70,14 @@ def test_noqa_parsing_ignores_hash_inside_string_literals() -> None:
         registry=registry,
     )
     assert violations == ()
+
+
+def test_noqa_prefix_suppression_matches_rule_families() -> None:
+    tree = ast.parse(SOURCE.replace("# noqa: X002", "# noqa: X0"), filename="sample.py")
+    violations = check_tree(
+        tree,
+        "sample.py",
+        SOURCE.replace("# noqa: X002", "# noqa: X0"),
+        config=LintConfig(select=("X002",), noqa_allowed=("X0",)),
+    )
+    assert violations == ()

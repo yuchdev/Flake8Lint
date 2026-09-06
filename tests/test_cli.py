@@ -1,4 +1,6 @@
 import json
+import os
+from pathlib import Path
 
 from flake8_lint.cli import main
 
@@ -30,3 +32,43 @@ def test_cli_errors_are_reported_on_stderr(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("flake8-lint: ")
+
+
+def test_cli_extends_config_filters_and_rule_modules(tmp_path, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "flake8_lint.toml").write_text(
+        'select = ["x0"]\nrule_modules = ["base.rules"]\n',
+        encoding="utf-8",
+    )
+    sample = project / "sample.py"
+    sample.write_text(
+        "def handler() -> int:\n"
+        '    """Handle a broad exception."""\n'
+        "    try:\n"
+        "        risky()\n"
+        "    except Exception:\n"
+        "        raise\n",
+        encoding="utf-8",
+    )
+    cwd = Path.cwd()
+    try:
+        os.chdir(project)
+        assert (
+            main(
+                [
+                    "check",
+                    str(sample),
+                    "--select",
+                    "ORG",
+                    "--rule-module",
+                    "missing.module",
+                ]
+            )
+            == 2
+        )
+    finally:
+        os.chdir(cwd)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "No module named 'base'" in captured.err

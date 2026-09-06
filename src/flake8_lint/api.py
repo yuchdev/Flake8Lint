@@ -196,7 +196,7 @@ def _is_noqa_suppressed(
         return False
     if not codes:
         return True
-    return violation.code in codes
+    return _matches_code_prefix(violation.code, tuple(codes))
 
 
 def _parse_noqa_codes(line: str) -> frozenset[str] | None:

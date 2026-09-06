@@ -202,7 +202,7 @@ def _has_proper_docstring(node: ast.AST, lines: Sequence[str] | None) -> bool:
     if lines is None:
         return True
     doc_line = lines[first_stmt.lineno - 1].lstrip()
-    return doc_line.startswith('"""')
+    return doc_line.startswith(('"""', "'''"))
 
 
 def _docstring_has_structured_header(doc: str) -> bool:

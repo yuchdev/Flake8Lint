@@ -55,10 +55,10 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
     ignore = _split_codes(args.ignore)
     rule_modules = tuple(args.rule_module)
     return config.merge(
-        select=select or None,
-        ignore=ignore or None,
+        select=_merge_unique(config.select, select) if select else None,
+        ignore=_merge_unique(config.ignore, ignore) if ignore else None,
         allow_noqa=False if args.no_noqa else None,
-        rule_modules=rule_modules or None,
+        rule_modules=_merge_unique(config.rule_modules, rule_modules) if rule_modules else None,
     )
 
 
@@ -67,3 +67,11 @@ def _split_codes(values: list[str]) -> tuple[str, ...]:
     for value in values:
         parsed.extend(chunk.strip().upper() for chunk in value.split(",") if chunk.strip())
     return tuple(parsed)
+
+
+def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[str, ...]:
+    merged = list(existing)
+    for value in extra:
+        if value not in merged:
+            merged.append(value)
+    return tuple(merged)

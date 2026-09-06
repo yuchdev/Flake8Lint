@@ -66,3 +66,15 @@ def test_union_rules_only_match_top_level_pep604_annotations(tmp_path) -> None:
     )
     violations = check_file(sample, config=LintConfig(select=("X011", "X012")))
     assert violations == ()
+
+
+def test_docstring_rule_accepts_single_quoted_docstrings(tmp_path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def documented():\n"
+        "    '''Single-quoted docstring.'''\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    violations = check_file(sample, config=LintConfig(select=("X005",)))
+    assert violations == ()
