@@ -8,7 +8,8 @@ from pathlib import Path
 
 from . import __version__
 from .api import EXIT_ERROR, EXIT_OK, EXIT_VIOLATIONS, format_json, format_text, lint_paths
-from .config import LintConfig, load_config
+from .config import LintConfig, load_config, validate_config
+from .registry import resolve_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,12 +18,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     check = subparsers.add_parser("check", help="Lint one or more files or directories")
-    check.add_argument("paths", nargs="*", default=["."])
+    check.add_argument("paths", nargs="*")
     check.add_argument("--config", help="Path to pyproject.toml or flake8_lint.toml")
     check.add_argument("--select", action="append", default=[])
     check.add_argument("--ignore", action="append", default=[])
     check.add_argument("--no-noqa", action="store_true", help="Disable noqa suppression")
     check.add_argument("--rule-module", action="append", default=[])
+    check.add_argument(
+        "--no-rule-plugins",
+        action="store_true",
+        help="Disable installed flake8_lint.rules entry-point providers",
+    )
     check.add_argument("--output-format", choices=("text", "json"), default="text")
     return parser
 
@@ -31,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.version:
-        print(__version__)
+        print(f"flake8-lint {__version__}")
         return EXIT_OK
     if args.command != "check":
         parser.print_help()
@@ -39,7 +45,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = _build_cli_config(args)
-        result = lint_paths(tuple(Path(path) for path in args.paths), config=config)
+        registry = resolve_registry(
+            rule_modules=config.rule_modules,
+            include_entry_points=not args.no_rule_plugins,
+        )
+        config = validate_config(config, registry.known_codes())
+        _emit_warnings(config)
+        result = lint_paths(tuple(Path(path) for path in args.paths), config=config, registry=registry)
     except Exception as exc:
         print(f"flake8-lint: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -50,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_cli_config(args: argparse.Namespace) -> LintConfig:
-    config = load_config(args.config) if args.config else load_config()
+    config = load_config(args.config, cwd=Path.cwd()) if args.config else load_config(cwd=Path.cwd())
     select = _split_codes(args.select)
     ignore = _split_codes(args.ignore)
     rule_modules = tuple(args.rule_module)
@@ -75,3 +87,8 @@ def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[st
         if value not in merged:
             merged.append(value)
     return tuple(merged)
+
+
+def _emit_warnings(config: LintConfig) -> None:
+    for warning in config.warnings:
+        print(f"flake8-lint: {warning}", file=sys.stderr)

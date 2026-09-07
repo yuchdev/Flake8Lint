@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from importlib import import_module, metadata
@@ -9,6 +10,7 @@ from typing import Any, Protocol
 
 ENTRY_POINT_GROUP = "flake8_lint.rules"
 RegisterRulesCallable = Callable[["RuleRegistry"], None]
+RULE_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]*\d{3}$")
 
 
 class RuleLike(Protocol):
@@ -33,6 +35,14 @@ class DuplicateRuleCodeError(ValueError):
     """Raised when multiple rules claim the same rule code."""
 
 
+class InvalidRuleCodeError(ValueError):
+    """Raised when a rule code does not follow the public naming contract."""
+
+
+class RuleProviderLoadError(RuntimeError):
+    """Raised when a rule provider cannot be imported or registered."""
+
+
 class RuleRegistry:
     def __init__(self) -> None:
         self._registrations: dict[str, RuleRegistration] = {}
@@ -45,7 +55,8 @@ class RuleRegistry:
         enabled: bool = True,
         reserved: bool = False,
     ) -> None:
-        code = rule.code.upper()
+        code = str(rule.code)
+        validate_rule_code(code)
         if code in self._registrations:
             existing = self._registrations[code]
             raise DuplicateRuleCodeError(
@@ -90,12 +101,27 @@ def resolve_registry(
         )
 
     for module_name in rule_modules:
-        _load_register_function(module_name)(registry)
+        try:
+            _load_register_function(module_name)(registry)
+        except (DuplicateRuleCodeError, InvalidRuleCodeError):
+            raise
+        except Exception as exc:
+            raise RuleProviderLoadError(
+                f"Failed to load rule module {module_name}: {exc}"
+            ) from exc
 
     if include_entry_points:
         for entry_point in _iter_entry_points():
-            register_rules = entry_point.load()
-            register_rules(registry)
+            provider_label = _describe_entry_point(entry_point)
+            try:
+                register_rules = entry_point.load()
+                register_rules(registry)
+            except (DuplicateRuleCodeError, InvalidRuleCodeError):
+                raise
+            except Exception as exc:
+                raise RuleProviderLoadError(
+                    f"Failed to load installed rule provider {provider_label}: {exc}"
+                ) from exc
 
     return registry
 
@@ -111,5 +137,23 @@ def _load_register_function(module_name: str) -> RegisterRulesCallable:
 def _iter_entry_points():
     entry_points = metadata.entry_points()
     if hasattr(entry_points, "select"):
-        return entry_points.select(group=ENTRY_POINT_GROUP)
-    return entry_points.get(ENTRY_POINT_GROUP, [])
+        selected = entry_points.select(group=ENTRY_POINT_GROUP)
+    else:
+        selected = entry_points.get(ENTRY_POINT_GROUP, [])
+    return tuple(sorted(selected, key=lambda entry_point: (entry_point.name, entry_point.value)))
+
+
+def validate_rule_code(code: str) -> str:
+    if not RULE_CODE_RE.fullmatch(code):
+        raise InvalidRuleCodeError(
+            f"Invalid rule code {code!r}: expected an uppercase alphanumeric prefix "
+            "followed by three digits"
+        )
+    return code
+
+
+def _describe_entry_point(entry_point) -> str:
+    dist_name = getattr(getattr(entry_point, "dist", None), "name", None)
+    if dist_name:
+        return f"{entry_point.name} ({dist_name}: {entry_point.value})"
+    return f"{entry_point.name} ({entry_point.value})"

@@ -16,6 +16,8 @@ DEFAULT_EXCLUDED_DIR_NAMES = frozenset(
         ".venv",
         "venv",
         "env",
+        ".eggs",
+        "eggs",
         "build",
         "dist",
         ".tox",
@@ -37,11 +39,12 @@ def discover_python_files(
     config: LintConfig | None = None,
 ) -> tuple[Path, ...]:
     effective_config = config or LintConfig()
+    root_dir = _root_dir(effective_config)
     seen: set[Path] = set()
     results: list[Path] = []
 
     for raw_path in paths:
-        path = Path(raw_path)
+        path = _resolve_candidate_path(raw_path, root_dir)
         if path.is_file():
             resolved = path.resolve()
             if _is_python_file(resolved) and _path_allowed(resolved, effective_config):
@@ -53,7 +56,7 @@ def discover_python_files(
         if not path.exists():
             continue
 
-        for file_path in _iter_directory(path.resolve()):
+        for file_path in _iter_directory(path.resolve(), effective_config):
             if _path_allowed(file_path, effective_config) and file_path not in seen:
                 seen.add(file_path)
                 results.append(file_path)
@@ -61,9 +64,15 @@ def discover_python_files(
     return tuple(sorted(results))
 
 
-def _iter_directory(path: Path) -> Iterable[Path]:
+def _iter_directory(path: Path, config: LintConfig) -> Iterable[Path]:
+    root_dir = _root_dir(config)
     for root, dirnames, filenames in os.walk(path):
-        dirnames[:] = sorted(name for name in dirnames if name not in DEFAULT_EXCLUDED_DIR_NAMES)
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if name not in DEFAULT_EXCLUDED_DIR_NAMES
+            and not _path_matches_any(Path(root) / name, config.exclude, root_dir)
+        )
         root_path = Path(root)
         for filename in sorted(filenames):
             candidate = root_path / filename
@@ -76,15 +85,51 @@ def _is_python_file(path: Path) -> bool:
 
 
 def _path_allowed(path: Path, config: LintConfig) -> bool:
-    absolute = path.as_posix()
-    if config.include and not any(_matches(absolute, pattern) for pattern in config.include):
-        return False
-    if any(_matches(absolute, pattern) for pattern in config.exclude):
-        return False
+    root_dir = _root_dir(config)
     if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in path.parts):
+        return False
+    if config.include and not _path_matches_any(path, config.include, root_dir):
+        return False
+    if _path_matches_any(path, config.exclude, root_dir):
         return False
     return True
 
 
-def _matches(value: str, pattern: str) -> bool:
-    return fnmatch(value, pattern) or fnmatch(Path(value).name, pattern)
+def path_matches_any(path: str | Path, patterns: Iterable[str], root_dir: str | Path | None) -> bool:
+    candidate = Path(path).resolve()
+    return _path_matches_any(candidate, patterns, Path(root_dir).resolve() if root_dir else None)
+
+
+def _path_matches_any(path: Path, patterns: Iterable[str], root_dir: Path | None) -> bool:
+    relative = _relative_path(path, root_dir)
+    name = path.name
+    for pattern in patterns:
+        normalized = pattern.replace("\\", "/").rstrip("/")
+        if not normalized:
+            continue
+        if _is_recursive_directory_match(relative, normalized):
+            return True
+        if fnmatch(relative, normalized) or fnmatch(name, normalized):
+            return True
+    return False
+
+
+def _is_recursive_directory_match(relative: str, pattern: str) -> bool:
+    return relative == pattern or relative.startswith(f"{pattern}/")
+
+
+def _relative_path(path: Path, root_dir: Path | None) -> str:
+    if root_dir is not None:
+        return os.path.relpath(path.resolve(), root_dir).replace("\\", "/")
+    return path.resolve().as_posix()
+
+
+def _resolve_candidate_path(path: str | Path, root_dir: Path) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return root_dir / candidate
+
+
+def _root_dir(config: LintConfig) -> Path:
+    return (config.base_dir or Path.cwd()).resolve()

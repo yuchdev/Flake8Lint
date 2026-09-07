@@ -67,6 +67,7 @@ class ProjectRulesPlugin:
             self.tree,
             self.filename,
             source,
+            validate_selectors=False,
             config=type(self)._config,
             registry=type(self)._registry,
         ):
