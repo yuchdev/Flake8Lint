@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
-from .api import LintResult, Rule, RuleContext, RuleViolation, check_file, check_tree, lint_paths
+from .api import (
+    LintResult,
+    Rule,
+    RuleContext,
+    RuleViolation,
+    check_file,
+    check_source,
+    check_tree,
+    lint_paths,
+)
+from .registry import RuleRegistry
 
 
 def _detect_version() -> str:
@@ -23,6 +33,8 @@ __all__ = [
     "RuleViolation",
     "__version__",
     "check_file",
+    "check_source",
     "check_tree",
     "lint_paths",
+    "RuleRegistry",
 ]
