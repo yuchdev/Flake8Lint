@@ -324,7 +324,9 @@ def _resolve_target_paths(
         resolved: list[Path] = []
         for raw_path in paths:
             candidate = Path(raw_path)
-            resolved.append(candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve())
+            resolved.append(
+                candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
+            )
         return tuple(resolved)
     if config.include:
         return (root_dir,)

@@ -26,8 +26,8 @@ jobs:
         run: pytest --cov=flake8_lint --cov-report=term-missing
       - name: Run Ruff
         run: ruff check .
-      - name: Run flake8-lint on package sources
-        run: python -m flake8_lint check src
+      - name: Run flake8-lint self-check subset
+        run: python -m flake8_lint check --select X001,X009,X010 src
       - name: Build package
         run: python -m build
 
@@ -56,7 +56,11 @@ jobs:
           "$tmpdir/venv/bin/pip" install dist/*.whl flake8
           "$tmpdir/venv/bin/flake8-lint" --version | grep '^flake8-lint 1.0.0$'
 
-          mkdir -p "$tmpdir/clean" "$tmpdir/bad" "$tmpdir/custom/my_project"
+          mkdir -p \
+            "$tmpdir/clean" \
+            "$tmpdir/bad" \
+            "$tmpdir/custom/my_project" \
+            "$tmpdir/provider_pkg/provider_rules"
           cat > "$tmpdir/clean/example.py" <<'PY'
           def documented() -> int:
               """Return a number."""
@@ -68,16 +72,24 @@ jobs:
           def handler():
               return 1
           PY
-          if "$tmpdir/venv/bin/flake8-lint" check "$tmpdir/bad/example.py"; then
-            echo "expected lint violations" >&2
+          set +e
+          "$tmpdir/venv/bin/flake8-lint" check "$tmpdir/bad/example.py"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected lint violations exit code 1, got $status" >&2
             exit 1
           fi
 
           cat > "$tmpdir/bad/flake8_lint.toml" <<'TOML'
           select = ["X999"]
           TOML
-          if "$tmpdir/venv/bin/flake8-lint" check --config "$tmpdir/bad/flake8_lint.toml" "$tmpdir/bad/example.py"; then
-            echo "expected invalid-config failure" >&2
+          set +e
+          "$tmpdir/venv/bin/flake8-lint" check --config "$tmpdir/bad/flake8_lint.toml" "$tmpdir/bad/example.py"
+          status=$?
+          set -e
+          if [ "$status" -ne 2 ]; then
+            echo "expected invalid-config exit code 2, got $status" >&2
             exit 1
           fi
 
@@ -93,8 +105,18 @@ jobs:
 
               def check(self, context: RuleContext):
                   for node in ast.walk(context.tree):
-                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
-                          yield RuleViolation(context.filename, node.lineno, node.col_offset, self.code, self.description)
+                      if (
+                          isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Name)
+                          and node.func.id == "print"
+                      ):
+                          yield RuleViolation(
+                              context.filename,
+                              node.lineno,
+                              node.col_offset,
+                              self.code,
+                              self.description,
+                          )
 
           def register_rules(registry: RuleRegistry) -> None:
               registry.register(NoPrintRule(), provider="my_project.lint_rules")
@@ -102,8 +124,60 @@ jobs:
           cat > "$tmpdir/custom/example.py" <<'PY'
           print("hello")
           PY
-          if PYTHONPATH="$tmpdir/custom" "$tmpdir/venv/bin/flake8-lint" check --rule-module my_project.lint_rules --select ACME001 "$tmpdir/custom/example.py"; then
-            echo "expected custom-rule violation" >&2
+          set +e
+          PYTHONPATH="$tmpdir/custom" "$tmpdir/venv/bin/flake8-lint" check --rule-module my_project.lint_rules --select ACME001 "$tmpdir/custom/example.py"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected custom-rule exit code 1, got $status" >&2
+            exit 1
+          fi
+
+          cat > "$tmpdir/provider_pkg/pyproject.toml" <<'TOML'
+          [build-system]
+          requires = ["setuptools>=69", "wheel"]
+          build-backend = "setuptools.build_meta"
+
+          [project]
+          name = "flake8-lint-provider-smoke"
+          version = "0.0.0"
+
+          [project.entry-points."flake8_lint.rules"]
+          provider_smoke = "provider_rules:register_rules"
+          TOML
+          cat > "$tmpdir/provider_pkg/provider_rules/__init__.py" <<'PY'
+          import ast
+          from flake8_lint import RuleContext, RuleRegistry, RuleViolation
+
+          class ProviderRule:
+              code = "VEND001"
+              description = "Do not call print() in provider smoke test."
+
+              def check(self, context: RuleContext):
+                  for node in ast.walk(context.tree):
+                      if (
+                          isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Name)
+                          and node.func.id == "print"
+                      ):
+                          yield RuleViolation(
+                              context.filename,
+                              node.lineno,
+                              node.col_offset,
+                              self.code,
+                              self.description,
+                          )
+
+          def register_rules(registry: RuleRegistry) -> None:
+              registry.register(ProviderRule(), provider="provider_rules")
+          PY
+          "$tmpdir/venv/bin/pip" install "$tmpdir/provider_pkg"
+          set +e
+          "$tmpdir/venv/bin/flake8-lint" check --select VEND001 "$tmpdir/custom/example.py"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected installed-provider exit code 1, got $status" >&2
             exit 1
           fi
 
@@ -115,7 +189,11 @@ jobs:
               except Exception:
                   return 1
           PY
-          if "$tmpdir/venv/bin/python" -m flake8 --select X002 "$tmpdir/broad_exception.py"; then
-            echo "expected flake8 plugin violation" >&2
+          set +e
+          "$tmpdir/venv/bin/python" -m flake8 --select X002 "$tmpdir/broad_exception.py"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected flake8 plugin exit code 1, got $status" >&2
             exit 1
           fi

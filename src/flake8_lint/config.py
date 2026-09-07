@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-
 LEGACY_SECTION_WARNING = (
     "[tool.flake8_lint_tests] is deprecated; rename it to [tool.flake8_lint]."
 )

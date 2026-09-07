@@ -95,7 +95,11 @@ def _path_allowed(path: Path, config: LintConfig) -> bool:
     return True
 
 
-def path_matches_any(path: str | Path, patterns: Iterable[str], root_dir: str | Path | None) -> bool:
+def path_matches_any(
+    path: str | Path,
+    patterns: Iterable[str],
+    root_dir: str | Path | None,
+) -> bool:
     candidate = Path(path).resolve()
     return _path_matches_any(candidate, patterns, Path(root_dir).resolve() if root_dir else None)
 

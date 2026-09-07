@@ -1,5 +1,4 @@
 import ast
-from pathlib import Path
 
 from flake8_lint import RuleContext, RuleRegistry, RuleViolation, check_tree
 from flake8_lint.config import LintConfig

@@ -1,10 +1,19 @@
 import ast
+import importlib
 import os
+import runpy
 from pathlib import Path
 
 import pytest
 
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation, check_source, check_tree, lint_paths
+from flake8_lint import (
+    RuleContext,
+    RuleRegistry,
+    RuleViolation,
+    check_source,
+    check_tree,
+    lint_paths,
+)
 from flake8_lint.api import LintResult
 from flake8_lint.config import ConfigValidationError, LintConfig
 
@@ -107,3 +116,22 @@ def test_lint_paths_defaults_to_src_and_tests_and_relativizes_output(tmp_path) -
 
     assert result.files_checked == 2
     assert [violation.filename for violation in result.violations] == ["src/bad.py"]
+
+
+def test_package_version_falls_back_when_distribution_metadata_is_missing(monkeypatch) -> None:
+    from importlib import metadata
+
+    import flake8_lint
+
+    def missing_version(_name: str) -> str:
+        raise metadata.PackageNotFoundError
+
+    monkeypatch.setattr("importlib.metadata.version", missing_version)
+    reloaded = importlib.reload(flake8_lint)
+    assert reloaded.__version__ == "1.0.0"
+
+
+def test_python_m_entry_point_raises_system_exit(monkeypatch) -> None:
+    monkeypatch.setattr("flake8_lint.cli.main", lambda: 7)
+    with pytest.raises(SystemExit, match="7"):
+        runpy.run_module("flake8_lint.__main__", run_name="__main__")

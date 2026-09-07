@@ -100,3 +100,42 @@ def test_x011_and_x012_do_not_double_report_same_annotation() -> None:
         config=LintConfig(select=("X011", "X012")),
     )
     assert [violation.code for violation in violations] == ["X011"]
+
+
+def test_x005_reports_missing_structured_test_docstring_for_test_functions() -> None:
+    source = "def test_case():\n    return 1\n"
+    violations = check_source(
+        source,
+        filename="test_sample.py",
+        config=LintConfig(select=("X005",)),
+    )
+    assert [violation.code for violation in violations] == ["X005"]
+
+
+def test_x005_reports_incomplete_structured_test_docstring() -> None:
+    source = (
+        'def test_case():\n'
+        '    """[Unit] demo\\n\\nScenario: test\\n"""\n'
+        "    return 1\n"
+    )
+    violations = check_source(
+        source,
+        filename="tests/test_sample.py",
+        config=LintConfig(select=("X005",)),
+    )
+    assert [violation.code for violation in violations] == ["X005"]
+
+
+def test_x005_accepts_structured_test_docstring() -> None:
+    source = (
+        'def test_case():\n'
+        '    """[Unit] demo\\n\\nScenario: test\\nBoundaries: none\\n'
+        '    On failure, first check: inputs\\n"""\n'
+        "    return None\n"
+    )
+    violations = check_source(
+        source,
+        filename="tests/test_sample.py",
+        config=LintConfig(select=("X005",)),
+    )
+    assert violations == ()

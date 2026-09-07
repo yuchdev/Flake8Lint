@@ -24,7 +24,9 @@ class LocalRule:
 def test_direct_rule_registration_and_filtering() -> None:
     registry = RuleRegistry()
     registry.register(LocalRule(), provider="tests.local")
-    assert [violation.code for violation in check_source("x = 1\n", rules=[LocalRule()])] == ["ORG001"]
+    assert [
+        violation.code for violation in check_source("x = 1\n", rules=[LocalRule()])
+    ] == ["ORG001"]
     assert check_source("x = 1\n", config=LintConfig(ignore=("ORG",)), rules=[LocalRule()]) == ()
 
 

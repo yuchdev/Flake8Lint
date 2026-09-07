@@ -51,7 +51,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         config = validate_config(config, registry.known_codes())
         _emit_warnings(config)
-        result = lint_paths(tuple(Path(path) for path in args.paths), config=config, registry=registry)
+        result = lint_paths(
+            tuple(Path(path) for path in args.paths),
+            config=config,
+            registry=registry,
+        )
     except Exception as exc:
         print(f"flake8-lint: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -62,7 +66,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_cli_config(args: argparse.Namespace) -> LintConfig:
-    config = load_config(args.config, cwd=Path.cwd()) if args.config else load_config(cwd=Path.cwd())
+    if args.config:
+        config = load_config(args.config, cwd=Path.cwd())
+    else:
+        config = load_config(cwd=Path.cwd())
     select = _split_codes(args.select)
     ignore = _split_codes(args.ignore)
     rule_modules = tuple(args.rule_module)

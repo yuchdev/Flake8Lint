@@ -10,7 +10,11 @@ class NoPrintRule:
 
     def check(self, context: RuleContext):
         for node in ast.walk(context.tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "print"
+            ):
                 yield RuleViolation(
                     context.filename,
                     node.lineno,
@@ -42,8 +46,18 @@ def test_custom_rule_docs_example_lint_paths_flow(tmp_path) -> None:
         '    description = "Do not call print() in production code."\n\n'
         "    def check(self, context: RuleContext):\n"
         "        for node in ast.walk(context.tree):\n"
-        '            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":\n'
-        "                yield RuleViolation(context.filename, node.lineno, node.col_offset, self.code, self.description)\n\n"
+        "            if (\n"
+        "                isinstance(node, ast.Call)\n"
+        "                and isinstance(node.func, ast.Name)\n"
+        "                and node.func.id == \"print\"\n"
+        "            ):\n"
+        "                yield RuleViolation(\n"
+        "                    context.filename,\n"
+        "                    node.lineno,\n"
+        "                    node.col_offset,\n"
+        "                    self.code,\n"
+        "                    self.description,\n"
+        "                )\n\n"
         "def register_rules(registry: RuleRegistry) -> None:\n"
         '    registry.register(NoPrintRule(), provider="my_project.lint_rules")\n',
         encoding="utf-8",

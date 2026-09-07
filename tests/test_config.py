@@ -1,10 +1,8 @@
-from pathlib import Path
-
 import pytest
 
 from flake8_lint.config import (
-    ConfigValidationError,
     LEGACY_SECTION_WARNING,
+    ConfigValidationError,
     LintConfig,
     load_config,
     validate_config,
