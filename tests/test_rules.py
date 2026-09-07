@@ -74,6 +74,29 @@ def test_x007_ignores_returns_inside_nested_classes(tmp_path) -> None:
     assert violations == ()
 
 
+def test_x006_flags_imports_inside_class_bodies(tmp_path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "class Demo:\n"
+        '    """Demo class."""\n'
+        "    import math\n",
+        encoding="utf-8",
+    )
+    violations = check_file(sample, config=LintConfig(select=("X006",)))
+    assert [violation.code for violation in violations] == ["X006"]
+
+
+def test_x008_skips_stub_functions(tmp_path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def placeholder() -> None:\n"
+        "    ...\n",
+        encoding="utf-8",
+    )
+    violations = check_file(sample, config=LintConfig(select=("X008",)))
+    assert violations == ()
+
+
 def test_union_rules_only_match_top_level_pep604_annotations(tmp_path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
@@ -100,6 +123,18 @@ def test_x011_and_x012_do_not_double_report_same_annotation() -> None:
         config=LintConfig(select=("X011", "X012")),
     )
     assert [violation.code for violation in violations] == ["X011"]
+
+
+def test_docstring_rule_accepts_single_quoted_docstrings(tmp_path) -> None:
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def documented():\n"
+        "    '''Single-quoted docstring.'''\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    violations = check_file(sample, config=LintConfig(select=("X005",)))
+    assert violations == ()
 
 
 def test_x005_reports_missing_structured_test_docstring_for_test_functions() -> None:

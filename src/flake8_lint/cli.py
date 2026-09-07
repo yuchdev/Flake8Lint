@@ -74,8 +74,8 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
     ignore = _split_codes(args.ignore)
     rule_modules = tuple(args.rule_module)
     return config.merge(
-        select=_merge_unique(config.select, select) if select else None,
-        ignore=_merge_unique(config.ignore, ignore) if ignore else None,
+        select=select if select else None,
+        ignore=ignore if ignore else None,
         allow_noqa=False if args.no_noqa else None,
         rule_modules=_merge_unique(config.rule_modules, rule_modules) if rule_modules else None,
     )

@@ -86,7 +86,7 @@ def _is_python_file(path: Path) -> bool:
 
 def _path_allowed(path: Path, config: LintConfig) -> bool:
     root_dir = _root_dir(config)
-    if any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in path.parts):
+    if _is_under_default_excluded_dir(path, root_dir):
         return False
     if config.include and not _path_matches_any(path, config.include, root_dir):
         return False
@@ -126,6 +126,15 @@ def _relative_path(path: Path, root_dir: Path | None) -> str:
     if root_dir is not None:
         return os.path.relpath(path.resolve(), root_dir).replace("\\", "/")
     return path.resolve().as_posix()
+
+
+def _is_under_default_excluded_dir(path: Path, root_dir: Path) -> bool:
+    relative_parts = _relative_path(path, root_dir).split("/")
+    return any(
+        part in DEFAULT_EXCLUDED_DIR_NAMES
+        for part in relative_parts
+        if part not in {"", ".", ".."}
+    )
 
 
 def _resolve_candidate_path(path: str | Path, root_dir: Path) -> Path:

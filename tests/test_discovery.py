@@ -60,3 +60,14 @@ def test_discovery_handles_explicit_file_and_stable_order(tmp_path) -> None:
         config=LintConfig(base_dir=tmp_path),
     )
     assert files == (first.resolve(), second.resolve())
+
+
+def test_discovery_default_excludes_are_applied_relative_to_root(tmp_path) -> None:
+    project = tmp_path / "build" / "project"
+    src = project / "src"
+    src.mkdir(parents=True)
+    module = src / "module.py"
+    module.write_text("x = 1\n", encoding="utf-8")
+
+    files = discover_python_files((project,), config=LintConfig(base_dir=project))
+    assert files == (module.resolve(),)

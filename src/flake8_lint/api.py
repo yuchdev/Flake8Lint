@@ -329,11 +329,37 @@ def _resolve_target_paths(
             )
         return tuple(resolved)
     if config.include:
-        return (root_dir,)
+        return _include_traversal_roots(config.include, root_dir) or (root_dir,)
     defaults = tuple(
         candidate for candidate in (root_dir / "src", root_dir / "tests") if candidate.exists()
     )
     return defaults or (root_dir,)
+
+
+def _include_traversal_roots(include: Sequence[str], root_dir: Path) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for pattern in include:
+        if not pattern.strip():
+            continue
+        root = _safe_traversal_root(pattern, root_dir)
+        if root.exists() and root not in roots:
+            roots.append(root)
+    return tuple(roots)
+
+
+def _safe_traversal_root(pattern: str, root_dir: Path) -> Path:
+    parts = Path(pattern).parts
+    root = Path(parts[0]) if parts and Path(parts[0]).is_absolute() else root_dir
+    prefix: list[str] = []
+    for part in parts:
+        if any(character in part for character in "*?["):
+            break
+        prefix.append(part)
+    if not prefix:
+        return root
+    if Path(prefix[0]).is_absolute():
+        return Path(*prefix).resolve()
+    return (root_dir / Path(*prefix)).resolve()
 
 
 def _display_filename(path: Path, root_dir: Path) -> str:

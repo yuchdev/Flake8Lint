@@ -118,6 +118,31 @@ def test_lint_paths_defaults_to_src_and_tests_and_relativizes_output(tmp_path) -
     assert [violation.filename for violation in result.violations] == ["src/bad.py"]
 
 
+def test_lint_paths_uses_include_roots_when_no_paths_are_passed(tmp_path) -> None:
+    project = tmp_path / "project"
+    config_dir = project / "config"
+    src = project / "src"
+    config_dir.mkdir(parents=True)
+    src.mkdir()
+    (src / "bad.py").write_text("def handler():\n    return 1\n", encoding="utf-8")
+
+    cwd = Path.cwd()
+    try:
+        os.chdir(project)
+        result = lint_paths(
+            config=LintConfig(
+                base_dir=config_dir,
+                include=("../src",),
+                select=("X007",),
+            )
+        )
+    finally:
+        os.chdir(cwd)
+
+    assert result.files_checked == 1
+    assert [violation.filename for violation in result.violations] == ["src/bad.py"]
+
+
 def test_package_version_falls_back_when_distribution_metadata_is_missing(monkeypatch) -> None:
     from importlib import metadata
 

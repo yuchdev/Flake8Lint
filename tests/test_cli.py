@@ -181,3 +181,26 @@ def test_cli_no_rule_plugins_disables_installed_provider(monkeypatch, tmp_path, 
     assert "ZZZ001" in capsys.readouterr().out
     assert main(["check", str(sample), "--select", "ZZZ", "--no-rule-plugins"]) == 2
     assert "Unknown select rule selector(s): ZZZ" in capsys.readouterr().err
+
+
+def test_cli_select_and_ignore_override_loaded_config(tmp_path, capsys) -> None:
+    (tmp_path / "flake8_lint.toml").write_text(
+        'select = ["X999"]\nignore = ["X001"]\n',
+        encoding="utf-8",
+    )
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        "def f():\n    try:\n        run()\n    except:\n        return 1\n",
+        encoding="utf-8",
+    )
+
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        assert main(["check", "--select", "X001", "--ignore", "X002", "sample.py"]) == 1
+    finally:
+        os.chdir(cwd)
+
+    captured = capsys.readouterr()
+    assert "X001" in captured.out
+    assert "Unknown select rule selector(s): X999" not in captured.err
