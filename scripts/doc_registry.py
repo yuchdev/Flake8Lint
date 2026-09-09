@@ -1,4 +1,4 @@
-"""Build a registry of all *.md files under docs/ and .claude/, detect
+"""Build a registry of all *.md files under docs/ and .junie/, detect
 broken cross-references to *.md files, and suggest rename candidates.
 
 This is the backend for ``/doc-registry`` and the scan-mode of the
@@ -28,7 +28,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-SCAN_ROOTS = ["docs", ".claude"]
+SCAN_ROOTS = ["docs", ".junie"]
 
 EXCLUDED_DIRS = {
     ".git",
@@ -42,7 +42,7 @@ EXCLUDED_DIRS = {
     ".ruff_cache",
     "dist",
     "build",
-    "state",  # .claude/state/ holds cursor files, not documentation
+    "state",  # .junie/state/ holds cursor files, not documentation
 }
 
 _LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")

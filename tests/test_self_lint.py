@@ -29,13 +29,8 @@ def test_self_lint_api() -> None:
     result = lint_paths([PACKAGE_DIR], config=config)
 
     if not result.ok:
-        lines = [
-            f"{v.filename}:{v.lineno}:{v.col_offset}: {v.code} {v.message}"
-            for v in result.violations
-        ]
-        assert False, (  # noqa: PT015
-            "flake8-lint self-check found violations in src/flake8_lint/:\n" + "\n".join(lines)
-        )
+        lines = [f"{v.filename}:{v.lineno}:{v.col_offset}: {v.code} {v.message}" for v in result.violations]
+        raise AssertionError("flake8-lint self-check found violations in src/flake8_lint/:\n" + "\n".join(lines))
 
 
 def test_self_lint_cli_include_scoping() -> None:

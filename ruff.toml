@@ -27,7 +27,6 @@ select = [
 #   E501 - the line is too long
 ignore = [
     "UP007",
-    "UP038",
     "SIM300",
     "E402",
     "E501"

@@ -1,13 +1,13 @@
 """Convert bare *.md file mentions in documentation to Markdown links.
 
-Scans every ``*.md`` file under ``docs/`` and ``.claude/`` for unlinked
+Scans every ``*.md`` file under ``docs/`` and ``.junie/`` for unlinked
 references to other documentation files, then replaces them with
 ``[mention](/abs/path.md)`` links.  Cases that cannot be resolved
 deterministically are written to a report for human review.
 
 Resolution strategy (in order):
 
-1. **Exact path** — mention starts with ``docs/``, ``/.claude/``, etc.:
+1. **Exact path** — mention starts with ``docs/``, ``/.junie/``, etc.:
    look up the normalised path directly in the file registry.
 2. **Sibling match** — bare filename only, and a file with that name exists
    in the *same directory* as the source file: use that file (single
@@ -45,7 +45,7 @@ from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-SCAN_ROOTS = ["docs", ".claude"]
+SCAN_ROOTS = ["docs", ".junie"]
 
 EXCLUDED_DIRS = {
     ".git",
@@ -62,7 +62,7 @@ EXCLUDED_DIRS = {
     "state",
 }
 
-DEFAULT_REPORT = REPO_ROOT / ".claude" / "state" / "linkify-report.md"
+DEFAULT_REPORT = REPO_ROOT / ".junie" / "state" / "linkify-report.md"
 
 # ---------------------------------------------------------------------------
 # Regex helpers
@@ -463,7 +463,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "paths",
         nargs="*",
-        help="Files or directories to process (default: docs/ and .claude/).",
+        help="Files or directories to process (default: docs/ and .junie/).",
     )
     parser.add_argument(
         "--dry-run",

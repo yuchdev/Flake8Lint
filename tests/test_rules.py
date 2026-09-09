@@ -6,6 +6,60 @@ from flake8_lint import check_file, check_source
 from flake8_lint.config import LintConfig
 from flake8_lint.registry import resolve_registry
 
+SAMPLES = Path(__file__).parent / "samples"
+
+# (code, filename) pairs: each violation sample must report its target code at
+# least once when only that code is selected.
+VIOLATION_SAMPLES = [
+    ("X001", "x001_bare_except_violation.py"),
+    ("X002", "x002_broad_exception_violation.py"),
+    ("X004", "x004_muted_exception_violation.py"),
+    ("X005", "x005_missing_docstring_violation.py"),
+    ("X005", "x005_structured_test_docstring_violation.py"),
+    ("X006", "x006_local_import_violation.py"),
+    ("X007", "x007_missing_return_annotation_violation.py"),
+    ("X008", "x008_none_return_annotation_violation.py"),
+    ("X009", "x009_percent_formatting_violation.py"),
+    ("X010", "x010_import_error_suppression_violation.py"),
+    ("X011", "x011_optional_violation.py"),
+    ("X012", "x012_union_type_violation.py"),
+]
+
+# Clean/near-miss samples that are clean under the full default rule set.
+FULLY_CLEAN_SAMPLES = [
+    "x001_bare_except_clean.py",
+    "x002_broad_exception_clean.py",
+    "x003_reserved_code_never_fires_clean.py",
+    "x004_muted_exception_clean.py",
+    "x005_single_quoted_docstring_clean.py",
+    "x005_complete_structured_test_docstring_clean.py",
+    "x006_local_import_clean.py",
+    "x007_missing_return_annotation_clean.py",
+    "x009_percent_formatting_clean.py",
+    "x010_import_error_suppression_clean.py",
+    "x011_optional_clean.py",
+    "x012_union_type_clean.py",
+]
+
+
+@pytest.mark.parametrize(("code", "filename"), VIOLATION_SAMPLES)
+def test_violation_sample_reports_its_code(code: str, filename: str) -> None:
+    violations = check_file(SAMPLES / filename, config=LintConfig(select=(code,)))
+    assert code in [violation.code for violation in violations]
+
+
+@pytest.mark.parametrize("filename", FULLY_CLEAN_SAMPLES)
+def test_clean_sample_is_clean_under_all_builtin_rules(filename: str) -> None:
+    assert check_file(SAMPLES / filename) == ()
+
+
+def test_x008_stub_sample_is_clean_for_its_target_rule() -> None:
+    # A bare `-> None: ...` stub is X008-exempt, but a stub cannot carry a
+    # docstring without breaking the stub-body exemption, so it still trips
+    # X005; assert cleanliness for its target rule only.
+    sample = SAMPLES / "x008_none_return_annotation_clean.py"
+    assert check_file(sample, config=LintConfig(select=("X008",))) == ()
+
 
 @pytest.mark.parametrize(
     ("code", "source"),
@@ -28,10 +82,7 @@ from flake8_lint.registry import resolve_registry
         ("X009", 'value = "%s" % name\n'),
         (
             "X010",
-            "try:\n"
-            "    import missing\n"
-            "except ImportError:\n"
-            "    fallback = True\n",
+            "try:\n    import missing\nexcept ImportError:\n    fallback = True\n",
         ),
         ("X011", "value: int | None = None\n"),
         ("X012", "value: int | str = 1\n"),
@@ -50,12 +101,17 @@ def test_registry_includes_reserved_x003() -> None:
 
 
 def test_clean_sample_is_clean_for_all_builtin_rules() -> None:
-    sample = Path(__file__).parent / "samples" / "clean.py"
+    sample = SAMPLES / "valid_clean_module.py"
     assert check_file(sample) == ()
 
 
 def test_x003_remains_inactive_even_when_selected() -> None:
     assert check_source("x = 1\n", filename="sample.py", config=LintConfig(select=("X003",))) == ()
+
+
+def test_x003_reserved_sample_stays_inactive_when_selected() -> None:
+    sample = SAMPLES / "x003_reserved_code_never_fires_clean.py"
+    assert check_file(sample, config=LintConfig(select=("X003",))) == ()
 
 
 def test_x007_ignores_returns_inside_nested_classes(tmp_path) -> None:
@@ -77,9 +133,7 @@ def test_x007_ignores_returns_inside_nested_classes(tmp_path) -> None:
 def test_x006_flags_imports_inside_class_bodies(tmp_path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "class Demo:\n"
-        '    """Demo class."""\n'
-        "    import math\n",
+        'class Demo:\n    """Demo class."""\n    import math\n',
         encoding="utf-8",
     )
     violations = check_file(sample, config=LintConfig(select=("X006",)))
@@ -89,8 +143,7 @@ def test_x006_flags_imports_inside_class_bodies(tmp_path) -> None:
 def test_x008_skips_stub_functions(tmp_path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "def placeholder() -> None:\n"
-        "    ...\n",
+        "def placeholder() -> None:\n    ...\n",
         encoding="utf-8",
     )
     violations = check_file(sample, config=LintConfig(select=("X008",)))
@@ -100,8 +153,7 @@ def test_x008_skips_stub_functions(tmp_path) -> None:
 def test_union_rules_only_match_top_level_pep604_annotations(tmp_path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "data: list[int | None] = []\n"
-        "mapping: dict[str, int | float] = {}\n",
+        "data: list[int | None] = []\nmapping: dict[str, int | float] = {}\n",
         encoding="utf-8",
     )
     violations = check_file(sample, config=LintConfig(select=("X011", "X012")))
@@ -109,9 +161,8 @@ def test_union_rules_only_match_top_level_pep604_annotations(tmp_path) -> None:
 
 
 def test_x012_direct_samples_cover_violation_and_clean_case() -> None:
-    base = Path(__file__).parent / "samples"
-    violating = check_file(base / "x012_violation.py", config=LintConfig(select=("X012",)))
-    clean = check_file(base / "x012_clean.py", config=LintConfig(select=("X012",)))
+    violating = check_file(SAMPLES / "x012_union_type_violation.py", config=LintConfig(select=("X012",)))
+    clean = check_file(SAMPLES / "x012_union_type_clean.py", config=LintConfig(select=("X012",)))
     assert [violation.code for violation in violating] == ["X012"]
     assert clean == ()
 
@@ -128,9 +179,7 @@ def test_x011_and_x012_do_not_double_report_same_annotation() -> None:
 def test_docstring_rule_accepts_single_quoted_docstrings(tmp_path) -> None:
     sample = tmp_path / "sample.py"
     sample.write_text(
-        "def documented():\n"
-        "    '''Single-quoted docstring.'''\n"
-        "    return 1\n",
+        "def documented():\n    '''Single-quoted docstring.'''\n    return 1\n",
         encoding="utf-8",
     )
     violations = check_file(sample, config=LintConfig(select=("X005",)))
@@ -148,11 +197,7 @@ def test_x005_reports_missing_structured_test_docstring_for_test_functions() -> 
 
 
 def test_x005_reports_incomplete_structured_test_docstring() -> None:
-    source = (
-        'def test_case():\n'
-        '    """[Unit] demo\\n\\nScenario: test\\n"""\n'
-        "    return 1\n"
-    )
+    source = 'def test_case():\n    """[Unit] demo\\n\\nScenario: test\\n"""\n    return 1\n'
     violations = check_source(
         source,
         filename="tests/test_sample.py",
@@ -163,7 +208,7 @@ def test_x005_reports_incomplete_structured_test_docstring() -> None:
 
 def test_x005_accepts_structured_test_docstring() -> None:
     source = (
-        'def test_case():\n'
+        "def test_case():\n"
         '    """[Unit] demo\\n\\nScenario: test\\nBoundaries: none\\n'
         '    On failure, first check: inputs\\n"""\n'
         "    return None\n"

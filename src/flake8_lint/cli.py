@@ -75,10 +75,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 def _build_cli_config(args: argparse.Namespace) -> LintConfig:
     """Load the on-disk config and overlay CLI overrides onto it."""
-    if args.config:
-        config = load_config(args.config, cwd=Path.cwd())
-    else:
-        config = load_config(cwd=Path.cwd())
+    config = load_config(args.config, cwd=Path.cwd()) if args.config else load_config(cwd=Path.cwd())
     select = _split_codes(args.select)
     ignore = _split_codes(args.ignore)
     rule_modules = tuple(args.rule_module)

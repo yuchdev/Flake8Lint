@@ -162,11 +162,7 @@ def _contains_exception(exc_node: ast.expr) -> bool:
 def _check_broad_exception(context: RuleContext) -> Iterable[RuleViolation]:
     """X002: flag ``except Exception:`` handlers."""
     for node in ast.walk(context.tree):
-        if (
-            isinstance(node, ast.ExceptHandler)
-            and node.type is not None
-            and _contains_exception(node.type)
-        ):
+        if isinstance(node, ast.ExceptHandler) and node.type is not None and _contains_exception(node.type):
             yield _violation(
                 context,
                 node,
@@ -185,11 +181,7 @@ def _is_muting_stmt(stmt: ast.stmt) -> bool:
     """Return whether *stmt* silently mutes an exception handler."""
     if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break, ast.Return)):
         return True
-    return (
-        isinstance(stmt, ast.Expr)
-        and isinstance(stmt.value, ast.Constant)
-        and stmt.value.value is Ellipsis
-    )
+    return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis
 
 
 def _check_muted_exception(context: RuleContext) -> Iterable[RuleViolation]:
@@ -248,9 +240,10 @@ def _has_test_imports(tree: ast.AST) -> bool:
             for alias in node.names:
                 if alias.name.split(".", 1)[0] in {"pytest", "unittest"}:
                     return True
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split(".", 1)[0] in {"pytest", "unittest"}:
-                return True
+        elif (
+            isinstance(node, ast.ImportFrom) and node.module and node.module.split(".", 1)[0] in {"pytest", "unittest"}
+        ):
+            return True
     return False
 
 
@@ -295,9 +288,12 @@ def _iter_test_functions(tree: ast.AST) -> Iterable[ast.AST]:
             """Record *node* when it is an outermost ``test*`` function."""
             name = getattr(node, "name", "")
             outermost = self.function_depth == 0
-            if outermost and name.startswith("test"):
-                if not self.class_stack or self.class_stack[-1].name.startswith("Test"):
-                    self.results.append(node)
+            if (
+                outermost
+                and name.startswith("test")
+                and (not self.class_stack or self.class_stack[-1].name.startswith("Test"))
+            ):
+                self.results.append(node)
             self.function_depth += 1
             self.generic_visit(node)
             self.function_depth -= 1
@@ -315,8 +311,7 @@ def _check_docstrings(context: RuleContext) -> Iterable[RuleViolation]:
     """
     lines = context.source.splitlines() if context.source is not None else None
     generic_message = (
-        "Missing or improperly formatted docstring: add a coherent docstring block as the first "
-        "statement in the body."
+        "Missing or improperly formatted docstring: add a coherent docstring block as the first statement in the body."
     )
 
     if _is_test_module(context):
@@ -346,8 +341,7 @@ def _check_docstrings(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X005",
-                        "Missing or incomplete structured test docstring: include "
-                        "the required header and sections.",
+                        "Missing or incomplete structured test docstring: include the required header and sections.",
                     )
             elif not _has_proper_docstring(node, lines):
                 yield _violation(context, node, "X005", generic_message)
@@ -398,8 +392,7 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X006",
-                        "Do not use local imports inside function or class "
-                        "bodies; move imports to module scope.",
+                        "Do not use local imports inside function or class bodies; move imports to module scope.",
                     )
                 )
 
@@ -411,8 +404,7 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                         context,
                         node,
                         "X006",
-                        "Do not use local imports inside function or class "
-                        "bodies; move imports to module scope.",
+                        "Do not use local imports inside function or class bodies; move imports to module scope.",
                     )
                 )
 
@@ -515,8 +507,7 @@ def _check_percent_formatting(context: RuleContext) -> Iterable[RuleViolation]:
                 context,
                 node,
                 "X009",
-                "Do not use old-style '%' string formatting (e.g. '%s', '%d'); "
-                "use f-strings instead.",
+                "Do not use old-style '%' string formatting (e.g. '%s', '%d'); use f-strings instead.",
             )
 
 
@@ -543,11 +534,7 @@ def _has_import_in_body(body: Sequence[ast.stmt]) -> bool:
         for node in ast.walk(stmt):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 return True
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "__import__"
-            ):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "__import__":
                 return True
     return False
 
@@ -578,11 +565,7 @@ def _is_stub_body(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
     if len(node.body) != 1:
         return False
     stmt = node.body[0]
-    return (
-        isinstance(stmt, ast.Expr)
-        and isinstance(stmt.value, ast.Constant)
-        and stmt.value.value is Ellipsis
-    )
+    return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and stmt.value.value is Ellipsis
 
 
 def _is_union_with_none(annotation: Optional[ast.expr]) -> bool:
@@ -605,9 +588,7 @@ def _iter_annotations(tree: ast.AST) -> Iterable[ast.AST]:
     """Yield every parameter, return, and variable annotation in *tree*."""
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for arg in (
-                list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs)
-            ):
+            for arg in list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs):
                 if arg.annotation is not None:
                     yield arg.annotation
             if node.args.vararg and node.args.vararg.annotation is not None:
@@ -654,6 +635,5 @@ def _check_union_type_annotations(context: RuleContext) -> Iterable[RuleViolatio
                 context,
                 annotation,
                 "X012",
-                "Do not use `Type1 | Type2` in type hints; use `Union[Type1, "
-                "Type2]` from typing instead.",
+                "Do not use `Type1 | Type2` in type hints; use `Union[Type1, Type2]` from typing instead.",
             )

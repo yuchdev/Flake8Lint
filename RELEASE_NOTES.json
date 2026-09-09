@@ -1,0 +1,18 @@
+{
+  "releases": {
+    "1.0.0": {
+      "release_notes": [
+        "First stable release of flake8-lint: a standalone, reusable AST-based Python lint rule engine.",
+        "Ships four ways to run the same core: standalone CLI (flake8-lint check), Python API, a thin Flake8 plugin adapter, and an opt-in pytest helper (assert_lint_clean).",
+        "Built-in rules X001-X012 (X003 reserved/disabled), covering bare excepts, overly broad exceptions, muted exceptions, docstring requirements, local imports, missing/None return annotations, percent-formatting, import-error suppression, Optional usage, and union-type annotations.",
+        "Custom rule support via project-local rule modules and installed flake8_lint.rules entry points, with duplicate/invalid-code detection at registry resolution time.",
+        "Config discovery precedence: --config PATH > flake8_lint.toml > pyproject.toml [tool.flake8_lint] > legacy [tool.flake8_lint_tests] > defaults.",
+        "Engine-owned # noqa suppression semantics shared across all four integration surfaces.",
+        "CI verified on Python 3.11 through 3.14, including a wheel-smoke job exercising the built package end-to-end."
+      ]
+    }
+  },
+  "release": {
+    "download_link": "https://{package_name_dash}.s3.us-east-1.amazonaws.com/packages/{package_name}-{version}-py3-none-any.whl"
+  }
+}

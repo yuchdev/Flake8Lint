@@ -54,10 +54,9 @@ def discover_python_files(
         path = _resolve_candidate_path(raw_path, root_dir)
         if path.is_file():
             resolved = path.resolve()
-            if _is_python_file(resolved) and _path_allowed(resolved, effective_config):
-                if resolved not in seen:
-                    seen.add(resolved)
-                    results.append(resolved)
+            if _is_python_file(resolved) and _path_allowed(resolved, effective_config) and resolved not in seen:
+                seen.add(resolved)
+                results.append(resolved)
             continue
 
         if not path.exists():
@@ -145,9 +144,7 @@ def _relative_path(path: Path, root_dir: Optional[Path]) -> str:
 def _is_under_default_excluded_dir(path: Path, root_dir: Path) -> bool:
     """Return whether any path segment is a default-excluded directory name."""
     relative_parts = _relative_path(path, root_dir).split("/")
-    return any(
-        part in DEFAULT_EXCLUDED_DIR_NAMES for part in relative_parts if part not in {"", ".", ".."}
-    )
+    return any(part in DEFAULT_EXCLUDED_DIR_NAMES for part in relative_parts if part not in {"", ".", ".."})
 
 
 def _resolve_candidate_path(path: Union[str, Path], root_dir: Path) -> Path:

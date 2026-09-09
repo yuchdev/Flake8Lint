@@ -55,7 +55,7 @@ class LintConfig:
         config_path: Optional[Path] = None,
         legacy_mode: bool = False,
         warnings: Iterable[str] = (),
-    ) -> "LintConfig":
+    ) -> LintConfig:
         """Build a :class:`LintConfig` from a parsed TOML mapping.
 
         :param data: Raw config table, or ``None`` for an empty configuration.
@@ -96,7 +96,7 @@ class LintConfig:
         noqa_forbidden: Optional[tuple[str, ...]] = None,
         rule_modules: Optional[tuple[str, ...]] = None,
         warnings: Optional[tuple[str, ...]] = None,
-    ) -> "LintConfig":
+    ) -> LintConfig:
         """Return a copy with the supplied (non-``None``) fields overridden.
 
         ``select`` and ``ignore`` values are upper-cased when provided; every

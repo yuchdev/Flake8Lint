@@ -13,11 +13,11 @@ link to the specific file when citing a rule in a PR or review.
 ## Project-specific overrides
 
 The guide above is the baseline. Flake8 Linter adds the following mandatory
-rules on top (enforced by the `post_edit_format` and `style_fixes` hooks and
+rules on top (enforced by the explicit Junie quality workflow and
 CI gates):
 
 - **`Optional[T]` always** - never `T | None`, including inside subscripts and
-  `Annotated[...]`. Enforced by `.claude/hooks/style_fixes.py --check`.
+  `Annotated[...]`. Enforced by the repository style-fix workflow.
 - **Public APIs must be fully annotated.** Unannotated public symbols are a CI failure.
 - **ruff** (`select = E,F,I,UP,B,SIM`, line length 100) is the linter and
   formatter (`ruff format`). No Black, no Prettier.
