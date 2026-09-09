@@ -222,8 +222,24 @@ def lint_paths(
     )
     validated_config = validate_config(effective_config, effective_registry.known_codes())
     target_paths = _resolve_target_paths(paths, validated_config)
-    discovery_config = validated_config.merge(include=()) if paths else validated_config
-    files = discover_python_files(target_paths, config=discovery_config)
+    if paths:
+        file_targets = tuple(path for path in target_paths if path.is_file())
+        dir_targets = tuple(path for path in target_paths if path.is_dir())
+        files = discover_python_files(dir_targets, config=validated_config)
+        if file_targets:
+            files = tuple(
+                sorted(
+                    {
+                        *files,
+                        *discover_python_files(
+                            file_targets,
+                            config=validated_config.merge(include=()),
+                        ),
+                    }
+                )
+            )
+    else:
+        files = discover_python_files(target_paths, config=validated_config)
     root_dir = (validated_config.base_dir or Path.cwd()).resolve()
     violations: list[RuleViolation] = []
     for file_path in files:
