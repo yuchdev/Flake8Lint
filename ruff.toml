@@ -1,0 +1,34 @@
+src = ["src"]
+line-length = 120
+target-version = "py312"
+
+extend-exclude = [
+    "tests/samples"
+]
+
+[lint]
+# Fix specific types of warnings with `ruff check --select SIM102 --fix .`
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "SIM102",
+    "SIM108",
+    "C4",
+    "UP017",
+    "UP037"
+]
+
+# Disable the pyupgrade rules that rewrite it to the `X | None` shorthand:
+#   UP007 - Union[...] -> X | Y; Optional[X] -> X | None
+#   UP038 - ininstance(X, Y) -> X | Y
+#   SIM300 - Yoda condition x == f(a, b)
+#   E501 - the line is too long
+ignore = [
+    "UP007",
+    "UP038",
+    "SIM300",
+    "E402",
+    "E501"
+]
