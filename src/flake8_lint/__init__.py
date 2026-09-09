@@ -18,10 +18,13 @@ from .registry import RuleRegistry
 
 
 def _detect_version() -> str:
+    """Return the installed distribution version, or a default fallback."""
     try:
         return version("flake8-lint")
     except PackageNotFoundError:
-        return "1.0.0"
+        # Metadata is unavailable when running from an uninstalled source tree.
+        fallback_version = "1.0.0"
+        return fallback_version
 
 
 __version__ = _detect_version()

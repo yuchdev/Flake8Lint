@@ -9,10 +9,11 @@ import tokenize
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Optional, Protocol, Union
 
 from .config import LintConfig, validate_config
 from .discovery import discover_python_files, path_matches_any
+from .registry import RuleRegistry, resolve_registry
 
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
@@ -21,6 +22,15 @@ EXIT_ERROR = 2
 
 @dataclass(frozen=True)
 class RuleViolation:
+    """A single rule violation located in a source file.
+
+    :ivar filename: File the violation was found in.
+    :ivar lineno: 1-based line number of the violation.
+    :ivar col_offset: 0-based column offset of the violation.
+    :ivar code: Rule code that produced the violation.
+    :ivar message: Human-readable description of the violation.
+    """
+
     filename: str
     lineno: int
     col_offset: int
@@ -30,26 +40,47 @@ class RuleViolation:
 
 @dataclass(frozen=True)
 class LintResult:
+    """Aggregate outcome of linting one or more files.
+
+    :ivar violations: All violations found, in emission order.
+    :ivar files_checked: Number of files that were linted.
+    """
+
     violations: tuple[RuleViolation, ...]
     files_checked: int
 
     @property
     def ok(self) -> bool:
+        """Whether the run produced no violations."""
         return not self.violations
 
 
 @dataclass(frozen=True)
 class RuleContext:
+    """Inputs handed to each rule for a single module.
+
+    :ivar tree: Parsed AST of the module under analysis.
+    :ivar filename: Display name of the module being linted.
+    :ivar source: Original source text, when available, for line inspection.
+    """
+
     tree: ast.AST
     filename: str
-    source: str | None
+    source: Optional[str]
 
 
 class Rule(Protocol):
+    """Structural type implemented by every runnable rule.
+
+    :ivar code: The rule's unique code.
+    :ivar description: Human-readable summary of the rule.
+    """
+
     code: str
     description: str
 
     def check(self, context: RuleContext) -> Iterable[RuleViolation]:
+        """Yield the violations this rule finds in *context*."""
         ...
 
 
@@ -60,11 +91,11 @@ class RuleExecutionError(RuntimeError):
 def check_tree(
     tree: ast.AST,
     filename: str,
-    source: str | None = None,
+    source: Optional[str] = None,
     *,
     apply_noqa: bool = True,
     validate_selectors: bool = True,
-    config: LintConfig | None = None,
+    config: Optional[LintConfig] = None,
     registry=None,
 ) -> tuple[RuleViolation, ...]:
     """Run the resolved rule registry over a parsed module.
@@ -72,7 +103,6 @@ def check_tree(
     Callers may pass a pre-resolved *registry* to control provider loading and
     avoid repeated discovery work across multiple files.
     """
-    from .registry import resolve_registry
 
     effective_config = config or LintConfig()
     effective_registry = registry or resolve_registry(
@@ -92,7 +122,14 @@ def check_tree(
             continue
         try:
             emitted = tuple(registration.rule.check(context))
-        except Exception as exc:  # pragma: no cover - defensive surface
+        except (
+            AttributeError,
+            TypeError,
+            ValueError,
+            KeyError,
+            IndexError,
+            RuntimeError,
+        ) as exc:  # pragma: no cover - defensive surface
             provider = registration.provider or "<unknown provider>"
             raise RuleExecutionError(
                 f"Rule {registration.code} from {provider} failed: {exc}"
@@ -111,11 +148,11 @@ def check_tree(
 
 
 def check_file(
-    path: str | Path,
+    path: Union[str, Path],
     *,
     apply_noqa: bool = True,
     validate_selectors: bool = True,
-    config: LintConfig | None = None,
+    config: Optional[LintConfig] = None,
     registry=None,
 ) -> tuple[RuleViolation, ...]:
     """Parse a Python file and run the resolved registry against it.
@@ -143,16 +180,14 @@ def check_source(
     filename: str = "<string>",
     apply_noqa: bool = True,
     validate_selectors: bool = True,
-    config: LintConfig | None = None,
+    config: Optional[LintConfig] = None,
     registry=None,
-    rules: Sequence[Rule] | None = None,
+    rules: Optional[Sequence[Rule]] = None,
 ) -> tuple[RuleViolation, ...]:
     """Parse source text and lint it with either an explicit registry or rules."""
     tree = ast.parse(source, filename=filename)
     effective_registry = registry
     if effective_registry is None and rules is not None:
-        from .registry import RuleRegistry
-
         explicit_registry = RuleRegistry()
         for rule in rules:
             explicit_registry.register(rule, provider="flake8_lint.check_source")
@@ -169,9 +204,9 @@ def check_source(
 
 
 def lint_paths(
-    paths: Sequence[str | Path] | None = None,
+    paths: Optional[Sequence[Union[str, Path]]] = None,
     *,
-    config: LintConfig | None = None,
+    config: Optional[LintConfig] = None,
     registry=None,
 ) -> LintResult:
     """Discover Python files under *paths* and lint them.
@@ -179,7 +214,6 @@ def lint_paths(
     Callers may pass a pre-resolved *registry* when linting many files to avoid
     repeated provider-loading overhead.
     """
-    from .registry import resolve_registry
 
     effective_config = config or LintConfig()
     effective_registry = registry or resolve_registry(
@@ -199,13 +233,13 @@ def lint_paths(
             registry=effective_registry,
         )
         violations.extend(
-            replace(violation, filename=display_name)
-            for violation in file_violations
+            replace(violation, filename=display_name) for violation in file_violations
         )
     return LintResult(violations=tuple(violations), files_checked=len(files))
 
 
 def format_text(result: LintResult) -> str:
+    """Render *result* as a human-readable text report."""
     if result.ok:
         return f"Checked {result.files_checked} file(s); no violations found."
     return "\n".join(
@@ -216,6 +250,7 @@ def format_text(result: LintResult) -> str:
 
 
 def format_json(result: LintResult) -> str:
+    """Render *result* as a deterministic, indented JSON document."""
     payload = {
         "ok": result.ok,
         "files_checked": result.files_checked,
@@ -225,6 +260,7 @@ def format_json(result: LintResult) -> str:
 
 
 def _is_rule_enabled(code: str, config: LintConfig) -> bool:
+    """Return whether *code* survives the config's select/ignore filters."""
     if config.select and not _matches_code_prefix(code, config.select):
         return False
     if _matches_code_prefix(code, config.ignore):
@@ -234,11 +270,12 @@ def _is_rule_enabled(code: str, config: LintConfig) -> bool:
 
 def _is_noqa_suppressed(
     violation: RuleViolation,
-    source: str | None,
+    source: Optional[str],
     config: LintConfig,
     *,
     apply_noqa: bool,
 ) -> bool:
+    """Return whether *violation* is suppressed by a ``# noqa`` on its line."""
     if not apply_noqa or not config.allow_noqa or source is None:
         return False
     if not _path_allows_noqa(violation.filename, config):
@@ -258,6 +295,7 @@ def _is_noqa_suppressed(
 
 
 def _path_allows_noqa(filename: str, config: LintConfig) -> bool:
+    """Return whether ``# noqa`` is permitted for *filename* under *config*."""
     root_dir = config.base_dir or Path.cwd()
     if path_matches_any(filename, config.noqa_forbidden, root_dir):
         return False
@@ -266,7 +304,12 @@ def _path_allows_noqa(filename: str, config: LintConfig) -> bool:
     return True
 
 
-def _parse_noqa_codes(line: str) -> frozenset[str] | None:
+def _parse_noqa_codes(line: str) -> Optional[frozenset[str]]:
+    """Parse the codes from a ``# noqa`` comment on *line*.
+
+    :returns: ``None`` when the line carries no ``noqa`` comment, an empty set
+        for a bare ``# noqa`` (suppress everything), or the specific codes.
+    """
     comment = _extract_comment(line)
     if comment is None:
         return None
@@ -286,23 +329,29 @@ def _parse_noqa_codes(line: str) -> frozenset[str] | None:
     return frozenset(cleaned_codes)
 
 
-def _extract_comment(line: str) -> str | None:
+def _extract_comment(line: str) -> Optional[str]:
+    """Return the trailing comment text on *line*, or ``None`` if absent."""
     try:
         for token in tokenize.generate_tokens(io.StringIO(line).readline):
             if token.type == tokenize.COMMENT:
                 return token.string.removeprefix("#").strip()
     except tokenize.TokenError:
-        return None
+        # A single line that cannot be tokenised in isolation (e.g. an
+        # unterminated string) exposes no recognisable comment.
+        no_comment: Optional[str] = None
+        return no_comment
     return None
 
 
 def _matches_code_prefix(code: str, prefixes: Sequence[str]) -> bool:
+    """Return whether *code* starts with any entry in *prefixes*."""
     return any(code.startswith(prefix) for prefix in prefixes)
 
 
 def _sorted_violations(
     violations: Sequence[RuleViolation],
 ) -> list[RuleViolation]:
+    """Return *violations* sorted by location, code, and message."""
     return sorted(
         violations,
         key=lambda violation: (
@@ -316,9 +365,14 @@ def _sorted_violations(
 
 
 def _resolve_target_paths(
-    paths: Sequence[str | Path] | None,
+    paths: Optional[Sequence[Union[str, Path]]],
     config: LintConfig,
 ) -> tuple[Path, ...]:
+    """Resolve the concrete directories/files to scan for a lint run.
+
+    Explicit *paths* win; otherwise the config's ``include`` roots are used, and
+    finally ``src``/``tests`` (or the base directory) as defaults.
+    """
     root_dir = (config.base_dir or Path.cwd()).resolve()
     if paths:
         resolved: list[Path] = []
@@ -337,6 +391,7 @@ def _resolve_target_paths(
 
 
 def _include_traversal_roots(include: Sequence[str], root_dir: Path) -> tuple[Path, ...]:
+    """Derive existing traversal roots from the config's include patterns."""
     roots: list[Path] = []
     for pattern in include:
         if not pattern.strip():
@@ -348,6 +403,7 @@ def _include_traversal_roots(include: Sequence[str], root_dir: Path) -> tuple[Pa
 
 
 def _safe_traversal_root(pattern: str, root_dir: Path) -> Path:
+    """Return the fixed directory prefix of *pattern* before any glob wildcard."""
     parts = Path(pattern).parts
     root = Path(parts[0]) if parts and Path(parts[0]).is_absolute() else root_dir
     prefix: list[str] = []
@@ -363,10 +419,9 @@ def _safe_traversal_root(pattern: str, root_dir: Path) -> Path:
 
 
 def _display_filename(path: Path, root_dir: Path) -> str:
+    """Return *path* relative to the cwd or *root_dir*, else its raw string."""
     resolved = path.resolve()
     for base in (Path.cwd().resolve(), root_dir):
-        try:
+        if resolved.is_relative_to(base):
             return resolved.relative_to(base).as_posix()
-        except ValueError:
-            continue
     return str(path)

@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Union
 
 from .api import RuleContext, RuleViolation
 from .registry import RuleRegistration
@@ -14,15 +15,24 @@ from .registry import RuleRegistration
 
 @dataclass(frozen=True)
 class CallbackRule:
+    """Adapt a plain callback function into a :class:`Rule`.
+
+    :ivar code: The rule's unique code.
+    :ivar description: Human-readable summary of the rule.
+    :ivar callback: Function producing violations for a context.
+    """
+
     code: str
     description: str
     callback: Callable[[RuleContext], Iterable[RuleViolation]]
 
     def check(self, context: RuleContext) -> Iterable[RuleViolation]:
+        """Delegate to the wrapped callback for *context*."""
         return self.callback(context)
 
 
 def builtin_registrations() -> tuple[RuleRegistration, ...]:
+    """Return the registrations for every built-in ``X###`` rule."""
     return (
         RuleRegistration(
             code="X001",
@@ -118,6 +128,7 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
 
 
 def _violation(context: RuleContext, node: ast.AST, code: str, message: str) -> RuleViolation:
+    """Build a :class:`RuleViolation` at *node*'s position for *code*."""
     return RuleViolation(
         filename=context.filename,
         lineno=getattr(node, "lineno", 1),
@@ -128,6 +139,7 @@ def _violation(context: RuleContext, node: ast.AST, code: str, message: str) -> 
 
 
 def _check_bare_except(context: RuleContext) -> Iterable[RuleViolation]:
+    """X001: flag bare ``except:`` handlers."""
     for node in ast.walk(context.tree):
         if isinstance(node, ast.ExceptHandler) and node.type is None:
             yield _violation(
@@ -139,6 +151,7 @@ def _check_bare_except(context: RuleContext) -> Iterable[RuleViolation]:
 
 
 def _contains_exception(exc_node: ast.expr) -> bool:
+    """Return whether *exc_node* names ``Exception`` directly or in a tuple."""
     if isinstance(exc_node, ast.Name) and exc_node.id == "Exception":
         return True
     if isinstance(exc_node, ast.Tuple):
@@ -147,6 +160,7 @@ def _contains_exception(exc_node: ast.expr) -> bool:
 
 
 def _check_broad_exception(context: RuleContext) -> Iterable[RuleViolation]:
+    """X002: flag ``except Exception:`` handlers."""
     for node in ast.walk(context.tree):
         if (
             isinstance(node, ast.ExceptHandler)
@@ -162,11 +176,13 @@ def _check_broad_exception(context: RuleContext) -> Iterable[RuleViolation]:
 
 
 def _check_reserved(context: RuleContext) -> Iterable[RuleViolation]:
+    """X003: reserved placeholder rule that never emits violations."""
     del context
     return ()
 
 
 def _is_muting_stmt(stmt: ast.stmt) -> bool:
+    """Return whether *stmt* silently mutes an exception handler."""
     if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break, ast.Return)):
         return True
     return (
@@ -177,6 +193,7 @@ def _is_muting_stmt(stmt: ast.stmt) -> bool:
 
 
 def _check_muted_exception(context: RuleContext) -> Iterable[RuleViolation]:
+    """X004: flag handlers whose body only mutes the caught exception."""
     for node in ast.walk(context.tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
@@ -189,7 +206,12 @@ def _check_muted_exception(context: RuleContext) -> Iterable[RuleViolation]:
             )
 
 
-def _has_proper_docstring(node: ast.AST, lines: Sequence[str] | None) -> bool:
+def _has_proper_docstring(node: ast.AST, lines: Optional[Sequence[str]]) -> bool:
+    """Return whether *node*'s first statement is a triple-quoted docstring.
+
+    When *lines* is provided, the opening quote style is verified against the
+    source so that implicitly-concatenated or non-triple-quoted strings fail.
+    """
     body = getattr(node, "body", None)
     if not body:
         return False
@@ -206,6 +228,7 @@ def _has_proper_docstring(node: ast.AST, lines: Sequence[str] | None) -> bool:
 
 
 def _docstring_has_structured_header(doc: str) -> bool:
+    """Return whether *doc* opens with a ``[Unit|Integration|...]`` header."""
     header_re = re.compile(r"^\s*\[(Unit|Integration|Local|E2E)]\s+\S.*$")
     for line in doc.splitlines():
         if line.strip():
@@ -214,10 +237,12 @@ def _docstring_has_structured_header(doc: str) -> bool:
 
 
 def _docstring_has_section(doc: str, section_name: str) -> bool:
+    """Return whether any line in *doc* starts with *section_name*."""
     return any(line.strip().startswith(section_name) for line in doc.splitlines())
 
 
 def _has_test_imports(tree: ast.AST) -> bool:
+    """Return whether *tree* imports ``pytest`` or ``unittest``."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -230,6 +255,7 @@ def _has_test_imports(tree: ast.AST) -> bool:
 
 
 def _is_test_module(context: RuleContext) -> bool:
+    """Return whether *context* refers to a test module by name or imports."""
     path = Path(context.filename)
     name = path.name
     if name.startswith("test_") or name.endswith("_test.py"):
@@ -240,24 +266,33 @@ def _is_test_module(context: RuleContext) -> bool:
 
 
 def _iter_test_functions(tree: ast.AST) -> Iterable[ast.AST]:
+    """Return the top-level ``test*`` functions inside ``Test*`` scopes."""
+
     class Visitor(ast.NodeVisitor):
-        def __init__(self) -> None:
+        """Collect outermost test functions while tracking class/def nesting."""
+
+        def __init__(self):
+            """Initialise the empty class stack, depth counter, and results."""
             self.class_stack: list[ast.ClassDef] = []
             self.function_depth = 0
             self.results: list[ast.AST] = []
 
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        def visit_ClassDef(self, node: ast.ClassDef):
+            """Track the enclosing class while visiting its body."""
             self.class_stack.append(node)
             self.generic_visit(node)
             self.class_stack.pop()
 
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            """Dispatch a sync function definition to the shared handler."""
             self._visit_function(node)
 
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            """Dispatch an async function definition to the shared handler."""
             self._visit_function(node)
 
-        def _visit_function(self, node: ast.AST) -> None:
+        def _visit_function(self, node: ast.AST):
+            """Record *node* when it is an outermost ``test*`` function."""
             name = getattr(node, "name", "")
             outermost = self.function_depth == 0
             if outermost and name.startswith("test"):
@@ -273,6 +308,11 @@ def _iter_test_functions(tree: ast.AST) -> Iterable[ast.AST]:
 
 
 def _check_docstrings(context: RuleContext) -> Iterable[RuleViolation]:
+    """X005: require compliant docstrings on classes, functions, and methods.
+
+    Test modules additionally require the structured header and Scenario /
+    Boundaries / On failure sections on their test functions.
+    """
     lines = context.source.splitlines() if context.source is not None else None
     generic_message = (
         "Missing or improperly formatted docstring: add a coherent docstring block as the first "
@@ -322,27 +362,36 @@ def _check_docstrings(context: RuleContext) -> Iterable[RuleViolation]:
 
 
 def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
+    """X006: flag imports nested inside function or class bodies."""
+
     class Visitor(ast.NodeVisitor):
-        def __init__(self) -> None:
+        """Track scope depth and record imports found below module scope."""
+
+        def __init__(self):
+            """Initialise the scope-depth counter and violation list."""
             self.depth = 0
             self.violations: list[RuleViolation] = []
 
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            """Descend into a sync function body, tracking nesting depth."""
             self.depth += 1
             self.generic_visit(node)
             self.depth -= 1
 
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            """Descend into an async function body, tracking nesting depth."""
             self.depth += 1
             self.generic_visit(node)
             self.depth -= 1
 
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        def visit_ClassDef(self, node: ast.ClassDef):
+            """Descend into a class body, tracking nesting depth."""
             self.depth += 1
             self.generic_visit(node)
             self.depth -= 1
 
-        def visit_Import(self, node: ast.Import) -> None:
+        def visit_Import(self, node: ast.Import):
+            """Record ``import`` statements found below module scope."""
             if self.depth > 0:
                 self.violations.append(
                     _violation(
@@ -354,7 +403,8 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                     )
                 )
 
-        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        def visit_ImportFrom(self, node: ast.ImportFrom):
+            """Record ``from ... import`` statements found below module scope."""
             if self.depth > 0:
                 self.violations.append(
                     _violation(
@@ -366,7 +416,8 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
                     )
                 )
 
-        def visit_Call(self, node: ast.Call) -> None:
+        def visit_Call(self, node: ast.Call):
+            """Record ``__import__()`` calls found below module scope."""
             if self.depth > 0 and isinstance(node.func, ast.Name) and node.func.id == "__import__":
                 self.violations.append(
                     _violation(
@@ -385,7 +436,8 @@ def _check_local_imports(context: RuleContext) -> Iterable[RuleViolation]:
     return tuple(visitor.violations)
 
 
-def _function_returns_value(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _function_returns_value(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
+    """Return whether *node* has a ``return`` with a value in its own body."""
     queue: list[ast.AST] = list(node.body)
     while queue:
         current = queue.pop()
@@ -401,6 +453,7 @@ def _function_returns_value(node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
 
 
 def _check_missing_return_annotation(context: RuleContext) -> Iterable[RuleViolation]:
+    """X007: flag value-returning functions that lack a return annotation."""
     for node in ast.walk(context.tree):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -416,7 +469,8 @@ def _check_missing_return_annotation(context: RuleContext) -> Iterable[RuleViola
             )
 
 
-def _expr_is_none(expr: ast.expr | None) -> bool:
+def _expr_is_none(expr: Optional[ast.expr]) -> bool:
+    """Return whether *expr* is the ``None`` literal."""
     if expr is None:
         return False
     if isinstance(expr, ast.Name) and expr.id == "None":
@@ -425,6 +479,7 @@ def _expr_is_none(expr: ast.expr | None) -> bool:
 
 
 def _check_none_return_annotation(context: RuleContext) -> Iterable[RuleViolation]:
+    """X008: flag explicit ``-> None`` return annotations on non-stub functions."""
     for node in ast.walk(context.tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -441,9 +496,11 @@ def _check_none_return_annotation(context: RuleContext) -> Iterable[RuleViolatio
 
 
 def _check_percent_formatting(context: RuleContext) -> Iterable[RuleViolation]:
+    """X009: flag old-style ``%`` string formatting on string literals."""
     percent_pattern = r"%(?:\(\w+\))?[-#0 +]*\d*(?:\.\d+)?[hlL]?[diouxXeEfFgGcrs]"
 
     def has_percent_placeholders(value: str) -> bool:
+        """Return whether *value* contains a printf-style placeholder."""
         return bool(re.search(percent_pattern, value))
 
     for node in ast.walk(context.tree):
@@ -464,6 +521,7 @@ def _check_percent_formatting(context: RuleContext) -> Iterable[RuleViolation]:
 
 
 def _except_catches_import_error(handler: ast.ExceptHandler) -> bool:
+    """Return whether *handler* catches ``ImportError``/``ModuleNotFoundError``."""
     if handler.type is None:
         return False
     names = {"ImportError", "ModuleNotFoundError"}
@@ -475,10 +533,12 @@ def _except_catches_import_error(handler: ast.ExceptHandler) -> bool:
 
 
 def _except_handler_has_raise(handler: ast.ExceptHandler) -> bool:
+    """Return whether *handler*'s body contains a ``raise`` statement."""
     return any(isinstance(node, ast.Raise) for stmt in handler.body for node in ast.walk(stmt))
 
 
 def _has_import_in_body(body: Sequence[ast.stmt]) -> bool:
+    """Return whether *body* performs any import (statement or ``__import__``)."""
     for stmt in body:
         for node in ast.walk(stmt):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -493,6 +553,7 @@ def _has_import_in_body(body: Sequence[ast.stmt]) -> bool:
 
 
 def _check_import_error_suppression(context: RuleContext) -> Iterable[RuleViolation]:
+    """X010: flag try/except blocks that swallow import failures."""
     for node in ast.walk(context.tree):
         if not isinstance(node, ast.Try):
             continue
@@ -512,7 +573,8 @@ def _check_import_error_suppression(context: RuleContext) -> Iterable[RuleViolat
                 )
 
 
-def _is_stub_body(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _is_stub_body(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
+    """Return whether *node*'s body is a single ``...`` stub statement."""
     if len(node.body) != 1:
         return False
     stmt = node.body[0]
@@ -523,14 +585,16 @@ def _is_stub_body(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     )
 
 
-def _is_union_with_none(annotation: ast.expr | None) -> bool:
+def _is_union_with_none(annotation: Optional[ast.expr]) -> bool:
+    """Return whether *annotation* is a top-level ``X | None`` union."""
     if not _is_top_level_union(annotation):
         return False
     members = list(_iter_union_members(annotation))
     return any(_expr_is_none(member) for member in members)
 
 
-def _is_union_without_none(annotation: ast.expr | None) -> bool:
+def _is_union_without_none(annotation: Optional[ast.expr]) -> bool:
+    """Return whether *annotation* is a top-level union with no ``None`` member."""
     if not _is_top_level_union(annotation):
         return False
     members = list(_iter_union_members(annotation))
@@ -538,12 +602,11 @@ def _is_union_without_none(annotation: ast.expr | None) -> bool:
 
 
 def _iter_annotations(tree: ast.AST) -> Iterable[ast.AST]:
+    """Yield every parameter, return, and variable annotation in *tree*."""
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for arg in (
-                list(node.args.posonlyargs)
-                + list(node.args.args)
-                + list(node.args.kwonlyargs)
+                list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs)
             ):
                 if arg.annotation is not None:
                     yield arg.annotation
@@ -557,11 +620,13 @@ def _iter_annotations(tree: ast.AST) -> Iterable[ast.AST]:
             yield node.annotation
 
 
-def _is_top_level_union(annotation: ast.expr | None) -> bool:
+def _is_top_level_union(annotation: Optional[ast.expr]) -> bool:
+    """Return whether *annotation* is a ``|`` union at its top level."""
     return isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr)
 
 
 def _iter_union_members(annotation: ast.expr) -> Iterable[ast.expr]:
+    """Yield the flattened member expressions of a ``|`` union annotation."""
     if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
         yield from _iter_union_members(annotation.left)
         yield from _iter_union_members(annotation.right)
@@ -570,6 +635,7 @@ def _iter_union_members(annotation: ast.expr) -> Iterable[ast.expr]:
 
 
 def _check_union_none_annotations(context: RuleContext) -> Iterable[RuleViolation]:
+    """X011: flag ``Type | None`` annotations that should use ``Optional``."""
     for annotation in _iter_annotations(context.tree):
         if _is_union_with_none(annotation):
             yield _violation(
@@ -581,6 +647,7 @@ def _check_union_none_annotations(context: RuleContext) -> Iterable[RuleViolatio
 
 
 def _check_union_type_annotations(context: RuleContext) -> Iterable[RuleViolation]:
+    """X012: flag ``Type1 | Type2`` annotations that should use ``Union``."""
     for annotation in _iter_annotations(context.tree):
         if _is_union_without_none(annotation):
             yield _violation(
