@@ -1,0 +1,4 @@
+mode = "cli"
+paths = ["allowed", "forbidden"]
+exit_code = 1
+violation_codes = ["X002"]

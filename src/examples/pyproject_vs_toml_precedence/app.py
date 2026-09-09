@@ -1,0 +1,14 @@
+def bare(raw: str) -> int:
+    """Return the parsed integer, swallowing errors with a bare except."""
+    try:
+        return int(raw)
+    except:  # noqa: E722
+        return 0
+
+
+def broad(raw: str) -> int:
+    """Return the parsed integer, swallowing a broad exception."""
+    try:
+        return int(raw)
+    except Exception:
+        return 0

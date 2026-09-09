@@ -44,6 +44,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["flake8_lint*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -56,7 +57,7 @@ target-version = "py311"
 select = ["E", "F", "I"]
 
 [tool.flake8_lint]
-include = []
+include = ["src/flake8_lint"]
 exclude = []
 select = []
 ignore = []

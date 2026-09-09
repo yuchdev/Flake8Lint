@@ -1,0 +1,5 @@
+mode = "cli"
+paths = ["."]
+exit_code = 1
+violation_codes = ["USER001"]
+rule_modules = ["proj_rules.lint_rules"]

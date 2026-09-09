@@ -1,0 +1,2 @@
+select = ["USER001"]
+rule_modules = ["proj_rules.lint_rules"]

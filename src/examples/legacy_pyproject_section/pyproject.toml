@@ -1,0 +1,2 @@
+[tool.flake8_lint_tests]
+select = ["X001"]
