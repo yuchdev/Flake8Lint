@@ -22,7 +22,12 @@ def test_cli_check_json_reports_violation(tmp_path, capsys) -> None:
         "        return 1\n",
         encoding="utf-8",
     )
-    assert main(["check", str(sample), "--select", "X002", "--output-format", "json"]) == 1
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        assert main(["check", str(sample), "--select", "X002", "--output-format", "json"]) == 1
+    finally:
+        os.chdir(cwd)
     payload = json.loads(capsys.readouterr().out)
     assert payload["files_checked"] == 1
     assert payload["violations"][0]["code"] == "X002"
@@ -124,7 +129,7 @@ def test_cli_warns_for_legacy_config_and_invalid_canonical_config(tmp_path, caps
         '[tool.flake8_lint]\nselect = ["X001", "X999"]\n',
         encoding="utf-8",
     )
-    sample = "def documented() -> int:\n    \"\"\"Return a number.\"\"\"\n    return 1\n"
+    sample = 'def documented() -> int:\n    """Return a number."""\n    return 1\n'
     (legacy / "sample.py").write_text(sample, encoding="utf-8")
     (canonical / "sample.py").write_text(sample, encoding="utf-8")
 
@@ -177,10 +182,15 @@ def test_cli_no_rule_plugins_disables_installed_provider(monkeypatch, tmp_path, 
     sample = tmp_path / "sample.py"
     sample.write_text("x = 1\n", encoding="utf-8")
 
-    assert main(["check", str(sample), "--select", "ZZZ"]) == 1
-    assert "ZZZ001" in capsys.readouterr().out
-    assert main(["check", str(sample), "--select", "ZZZ", "--no-rule-plugins"]) == 2
-    assert "Unknown select rule selector(s): ZZZ" in capsys.readouterr().err
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        assert main(["check", str(sample), "--select", "ZZZ"]) == 1
+        assert "ZZZ001" in capsys.readouterr().out
+        assert main(["check", str(sample), "--select", "ZZZ", "--no-rule-plugins"]) == 2
+        assert "Unknown select rule selector(s): ZZZ" in capsys.readouterr().err
+    finally:
+        os.chdir(cwd)
 
 
 def test_cli_select_and_ignore_override_loaded_config(tmp_path, capsys) -> None:

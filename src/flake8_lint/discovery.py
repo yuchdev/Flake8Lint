@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Union
 
 from .config import LintConfig
 
@@ -34,10 +34,17 @@ DEFAULT_EXCLUDED_DIR_NAMES = frozenset(
 
 
 def discover_python_files(
-    paths: Iterable[str | Path],
+    paths: Iterable[Union[str, Path]],
     *,
-    config: LintConfig | None = None,
+    config: Optional[LintConfig] = None,
 ) -> tuple[Path, ...]:
+    """Collect the ``.py`` files under *paths* honouring the lint config.
+
+    :param paths: Files or directories to scan.
+    :param config: Optional lint config supplying include/exclude patterns and
+        the base directory; a default config is used when omitted.
+    :returns: A sorted tuple of resolved, de-duplicated Python file paths.
+    """
     effective_config = config or LintConfig()
     root_dir = _root_dir(effective_config)
     seen: set[Path] = set()
@@ -65,6 +72,7 @@ def discover_python_files(
 
 
 def _iter_directory(path: Path, config: LintConfig) -> Iterable[Path]:
+    """Yield resolved Python files under *path*, skipping excluded directories."""
     root_dir = _root_dir(config)
     for root, dirnames, filenames in os.walk(path):
         dirnames[:] = sorted(
@@ -81,10 +89,12 @@ def _iter_directory(path: Path, config: LintConfig) -> Iterable[Path]:
 
 
 def _is_python_file(path: Path) -> bool:
+    """Return whether *path* has a ``.py`` suffix."""
     return path.suffix == ".py"
 
 
 def _path_allowed(path: Path, config: LintConfig) -> bool:
+    """Return whether *path* passes the config's include/exclude filters."""
     root_dir = _root_dir(config)
     if _is_under_default_excluded_dir(path, root_dir):
         return False
@@ -96,15 +106,17 @@ def _path_allowed(path: Path, config: LintConfig) -> bool:
 
 
 def path_matches_any(
-    path: str | Path,
+    path: Union[str, Path],
     patterns: Iterable[str],
-    root_dir: str | Path | None,
+    root_dir: Optional[Union[str, Path]],
 ) -> bool:
+    """Return whether *path* matches any of *patterns* relative to *root_dir*."""
     candidate = Path(path).resolve()
     return _path_matches_any(candidate, patterns, Path(root_dir).resolve() if root_dir else None)
 
 
-def _path_matches_any(path: Path, patterns: Iterable[str], root_dir: Path | None) -> bool:
+def _path_matches_any(path: Path, patterns: Iterable[str], root_dir: Optional[Path]) -> bool:
+    """Return whether *path* matches any fnmatch/recursive-directory pattern."""
     relative = _relative_path(path, root_dir)
     name = path.name
     for pattern in patterns:
@@ -119,25 +131,27 @@ def _path_matches_any(path: Path, patterns: Iterable[str], root_dir: Path | None
 
 
 def _is_recursive_directory_match(relative: str, pattern: str) -> bool:
+    """Return whether *relative* equals or lives under directory *pattern*."""
     return relative == pattern or relative.startswith(f"{pattern}/")
 
 
-def _relative_path(path: Path, root_dir: Path | None) -> str:
+def _relative_path(path: Path, root_dir: Optional[Path]) -> str:
+    """Return *path* as a POSIX string relative to *root_dir* when given."""
     if root_dir is not None:
         return os.path.relpath(path.resolve(), root_dir).replace("\\", "/")
     return path.resolve().as_posix()
 
 
 def _is_under_default_excluded_dir(path: Path, root_dir: Path) -> bool:
+    """Return whether any path segment is a default-excluded directory name."""
     relative_parts = _relative_path(path, root_dir).split("/")
     return any(
-        part in DEFAULT_EXCLUDED_DIR_NAMES
-        for part in relative_parts
-        if part not in {"", ".", ".."}
+        part in DEFAULT_EXCLUDED_DIR_NAMES for part in relative_parts if part not in {"", ".", ".."}
     )
 
 
-def _resolve_candidate_path(path: str | Path, root_dir: Path) -> Path:
+def _resolve_candidate_path(path: Union[str, Path], root_dir: Path) -> Path:
+    """Resolve *path* against *root_dir* unless it is already absolute."""
     candidate = Path(path)
     if candidate.is_absolute():
         return candidate
@@ -145,4 +159,5 @@ def _resolve_candidate_path(path: str | Path, root_dir: Path) -> Path:
 
 
 def _root_dir(config: LintConfig) -> Path:
+    """Return the resolved base directory for *config*, defaulting to cwd."""
     return (config.base_dir or Path.cwd()).resolve()

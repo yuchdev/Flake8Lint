@@ -1,0 +1,2 @@
+select = ["X002"]
+noqa_allowed = ["allowed"]

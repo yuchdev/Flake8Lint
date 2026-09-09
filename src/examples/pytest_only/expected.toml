@@ -1,0 +1,4 @@
+mode = "pytest"
+paths = ["app.py"]
+exit_code = 1
+violation_codes = ["X009"]

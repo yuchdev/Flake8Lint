@@ -1,0 +1,5 @@
+mode = "cli"
+paths = ["."]
+exit_code = 1
+violation_codes = ["X001"]
+warnings_contain = ["deprecated"]

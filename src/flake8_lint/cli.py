@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 from . import __version__
 from .api import EXIT_ERROR, EXIT_OK, EXIT_VIOLATIONS, format_json, format_text, lint_paths
@@ -13,6 +14,7 @@ from .registry import resolve_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Construct the top-level argument parser and its ``check`` subcommand."""
     parser = argparse.ArgumentParser(prog="flake8-lint")
     parser.add_argument("--version", action="store_true", help="Show package version and exit")
     subparsers = parser.add_subparsers(dest="command")
@@ -33,7 +35,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
+    """Run the ``flake8-lint`` CLI and return a process exit code.
+
+    :param argv: Optional argument vector; defaults to ``sys.argv`` when omitted.
+    :returns: ``EXIT_OK`` when clean, ``EXIT_VIOLATIONS`` when violations are
+        found, or ``EXIT_ERROR`` when the invocation fails.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.version:
@@ -56,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             config=config,
             registry=registry,
         )
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError, SyntaxError) as exc:
         print(f"flake8-lint: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
@@ -66,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _build_cli_config(args: argparse.Namespace) -> LintConfig:
+    """Load the on-disk config and overlay CLI overrides onto it."""
     if args.config:
         config = load_config(args.config, cwd=Path.cwd())
     else:
@@ -82,6 +91,7 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
 
 
 def _split_codes(values: list[str]) -> tuple[str, ...]:
+    """Split comma-separated ``--select``/``--ignore`` values into codes."""
     parsed: list[str] = []
     for value in values:
         parsed.extend(chunk.strip().upper() for chunk in value.split(",") if chunk.strip())
@@ -89,6 +99,7 @@ def _split_codes(values: list[str]) -> tuple[str, ...]:
 
 
 def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[str, ...]:
+    """Append *extra* entries to *existing*, preserving order and uniqueness."""
     merged = list(existing)
     for value in extra:
         if value not in merged:
@@ -96,6 +107,7 @@ def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[st
     return tuple(merged)
 
 
-def _emit_warnings(config: LintConfig) -> None:
+def _emit_warnings(config: LintConfig):
+    """Print any accumulated configuration warnings to stderr."""
     for warning in config.warnings:
         print(f"flake8-lint: {warning}", file=sys.stderr)

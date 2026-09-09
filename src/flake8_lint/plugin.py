@@ -16,13 +16,22 @@ from .registry import resolve_registry
 
 
 class ProjectRulesPlugin:
+    """Flake8 plugin entry point exposing the built-in flake8-lint rules.
+
+    :cvar name: Plugin name reported to Flake8.
+    :cvar version: Plugin version, mirrored from the package version.
+    :cvar _config: Lint configuration derived from Flake8 options.
+    :cvar _registry: Cached registry of built-in rules (entry points excluded).
+    """
+
     name = "flake8-lint"
     version = __version__
     _config = LintConfig()
     _registry = resolve_registry(include_entry_points=False)
 
     @classmethod
-    def add_options(cls, option_manager) -> None:
+    def add_options(cls, option_manager):
+        """Register flake8-lint specific options on the Flake8 option manager."""
         option_manager.add_option(
             "--flake8-lint-no-noqa",
             action="store_true",
@@ -32,7 +41,8 @@ class ProjectRulesPlugin:
         )
 
     @classmethod
-    def parse_options(cls, options) -> None:
+    def parse_options(cls, options):
+        """Build the cached lint configuration from parsed Flake8 options."""
         select = _normalize_code_prefixes(
             getattr(options, "select", ()),
             getattr(options, "extend_select", ()),
@@ -51,11 +61,13 @@ class ProjectRulesPlugin:
             allow_noqa=not disable_noqa,
         )
 
-    def __init__(self, tree, filename: str = "<unknown>") -> None:
+    def __init__(self, tree, filename: str = "<unknown>"):
+        """Store the parsed AST and filename for a single Flake8 check pass."""
         self.tree = tree
         self.filename = filename
 
     def run(self):
+        """Yield Flake8-style violation tuples for the stored module."""
         source = None
         if self.filename not in (None, "-", "stdin", "<unknown>"):
             try:
@@ -80,6 +92,7 @@ class ProjectRulesPlugin:
 
 
 def _normalize_code_prefixes(*groups) -> tuple[str, ...]:
+    """Merge option groups into a de-duplicated tuple of upper-cased codes."""
     codes: list[str] = []
     for group in groups:
         for code in group or ():
