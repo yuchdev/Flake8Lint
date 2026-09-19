@@ -29,6 +29,7 @@ dev = [
   "flake8",
   "pytest",
   "pytest-cov",
+  "release-saga==1.0.1",
   "ruff",
   "twine",
 ]
@@ -65,3 +66,8 @@ allow_noqa = true
 noqa_allowed = []
 noqa_forbidden = []
 rule_modules = []
+
+[tool.release-saga]
+s3_bucket = "flake8-lint"
+s3_prefix = "packages/"
+git_tag_template = "release.{version}"
