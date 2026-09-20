@@ -1,5 +1,11 @@
 {
   "releases": {
+    "1.0.1": {
+      "release_notes": [
+        "Fixed S3 release URI.",
+        "Implemented AWS S3 release step."
+      ]
+    },
     "1.0.0": {
       "release_notes": [
         "First stable release of flake8-lint: a standalone, reusable AST-based Python lint rule engine.",
