@@ -68,6 +68,6 @@ noqa_forbidden = []
 rule_modules = []
 
 [tool.release-saga]
-s3_bucket = "flake8-lint"
-s3_prefix = "packages/"
+s3_bucket = "packages-s3-useast1-any"
+s3_prefix = "{package_name_dash}/"
 git_tag_template = "release.{version}"
