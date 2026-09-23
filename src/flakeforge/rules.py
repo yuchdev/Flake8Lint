@@ -1,4 +1,4 @@
-"""Built-in AST rule catalogue for flake8-lint."""
+"""Built-in AST rule catalogue for flakeforge."""
 
 from __future__ import annotations
 
@@ -46,13 +46,13 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
             code="X001",
             description="Do not use bare except.",
             rule=CallbackRule("X001", "Do not use bare except.", _check_bare_except),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X002",
             description="Do not use except Exception.",
             rule=CallbackRule("X002", "Do not use except Exception.", _check_broad_exception),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X003",
@@ -62,7 +62,7 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Do not create circular imports.",
                 _check_circular_imports,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X004",
@@ -72,19 +72,19 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Do not silently swallow exceptions.",
                 _check_muted_exception,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X005",
             description="Require compliant docstrings.",
             rule=CallbackRule("X005", "Require compliant docstrings.", _check_docstrings),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X006",
             description="Do not use local imports.",
             rule=CallbackRule("X006", "Do not use local imports.", _check_local_imports),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X007",
@@ -94,7 +94,7 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Require return annotations for value-returning functions.",
                 _check_missing_return_annotation,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X008",
@@ -104,13 +104,13 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Do not annotate returns with None.",
                 _check_none_return_annotation,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X009",
             description="Do not use percent formatting.",
             rule=CallbackRule("X009", "Do not use percent formatting.", _check_percent_formatting),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X010",
@@ -120,19 +120,19 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Do not suppress ImportError.",
                 _check_import_error_suppression,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X011",
             description="Do not use Type | None.",
             rule=CallbackRule("X011", "Do not use Type | None.", _check_union_none_annotations),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X012",
             description="Do not use Type1 | Type2.",
             rule=CallbackRule("X012", "Do not use Type1 | Type2.", _check_union_type_annotations),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X013",
@@ -142,7 +142,7 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Require RAII context management for subprocess.Popen and socket.socket.",
                 _check_non_raii_resources,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
         RuleRegistration(
             code="X014",
@@ -152,7 +152,7 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
                 "Enforce tracked TODO/FIXME metadata in comments.",
                 _check_todo_annotations,
             ),
-            provider="flake8_lint.builtin",
+            provider="flakeforge.builtin",
         ),
     )
 
@@ -356,7 +356,7 @@ def module_location(filename: str) -> Optional[ModuleLocation]:
     The import root is found by walking up from the file for as long as the
     containing directories are packages, mirroring how the module would be
     imported from that root. Files that do not exist on disk - a synthetic name
-    handed to :func:`~flake8_lint.check_source`, for instance - have no location.
+    handed to :func:`~flakeforge.check_source`, for instance - have no location.
     """
     path = Path(filename)
     if path.suffix != ".py" or not path.is_file():

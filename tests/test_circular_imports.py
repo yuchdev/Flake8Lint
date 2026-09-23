@@ -5,9 +5,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from flake8_lint import check_file, check_source
-from flake8_lint.config import LintConfig
-from flake8_lint.rules import (
+from flakeforge import check_file, check_source
+from flakeforge.config import LintConfig
+from flakeforge.rules import (
     ModuleImport,
     ModuleImportGraph,
     _cached_module_imports,

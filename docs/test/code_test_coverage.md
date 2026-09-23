@@ -132,7 +132,7 @@ Coverage settings are in `pyproject.toml` and `.coveragerc`
 
 1. **Create test file** first (TDD approach):
    ```
-   src/flake8_lint/feature/module.py
+   src/flakeforge/feature/module.py
    tests/feature/test_module.py  ← Create this first
    ```
 
@@ -260,9 +260,9 @@ pytest
 ### "Some files show 0% coverage"
 
 1. Verify the source path in `pyproject.toml` matches your package layout,
-   e.g. `src/flake8_lint`.
+   e.g. `src/flakeforge`.
 
-2. Ensure the test file imports the `flake8_lint` module.
+2. Ensure the test file imports the `flakeforge` module.
 
 3. Run from correct directory:
    ```powershell

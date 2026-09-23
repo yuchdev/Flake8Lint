@@ -56,9 +56,9 @@ def _run_cli_check(
     :param scenario_dir: Root directory of the scenario fixture.
     :param expected: Parsed ``expected.toml`` data.
     :param capsys: pytest capsys fixture for capturing stdout/stderr.
-    :returns: The exit code returned by :func:`flake8_lint.cli.main`.
+    :returns: The exit code returned by :func:`flakeforge.cli.main`.
     """
-    from flake8_lint.cli import main
+    from flakeforge.cli import main
 
     paths: list[str] = expected["paths"]
     expected_exit_code: int = expected["exit_code"]

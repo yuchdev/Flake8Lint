@@ -1,6 +1,6 @@
 import pytest
 
-from flake8_lint.testing import assert_lint_clean
+from flakeforge.testing import assert_lint_clean
 
 
 def test_assert_lint_clean_passes_for_clean_file(tmp_path) -> None:

@@ -4,17 +4,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from flake8_lint import RuleContext, RuleViolation, check_source, lint_paths
-from flake8_lint.config import LintConfig
+from flakeforge import RuleContext, RuleViolation, check_source, lint_paths
+from flakeforge.config import LintConfig
 
 _EXAMPLES_DIR = Path(__file__).parents[1] / "src" / "examples"
 
 
 def _console_script_cmd() -> list[str]:
-    """Return the flake8-lint invocation, falling back to ``python -m flake8_lint``."""
-    if shutil.which("flake8-lint") is not None:
-        return ["flake8-lint"]
-    return [sys.executable, "-m", "flake8_lint"]
+    """Return the flakeforge invocation, falling back to ``python -m flakeforge``."""
+    if shutil.which("flakeforge") is not None:
+        return ["flakeforge"]
+    return [sys.executable, "-m", "flakeforge"]
 
 
 class NoPrintRule:
@@ -53,7 +53,7 @@ def test_custom_rule_docs_example_lint_paths_flow(tmp_path) -> None:
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "lint_rules.py").write_text(
         "import ast\n"
-        "from flake8_lint import RuleContext, RuleRegistry, RuleViolation\n\n"
+        "from flakeforge import RuleContext, RuleRegistry, RuleViolation\n\n"
         "class NoPrintRule:\n"
         '    code = "ACME001"\n'
         '    description = "Do not call print() in production code."\n\n'
@@ -94,8 +94,8 @@ def test_custom_rule_docs_example_lint_paths_flow(tmp_path) -> None:
 def test_installed_console_script_checks_cli_only_scenario() -> None:
     """Prove the real installed entry point works end-to-end, not just the library.
 
-    Runs the actual ``flake8-lint`` console script (or falls back to
-    ``python -m flake8_lint``) against the ``cli_only`` example fixture and
+    Runs the actual ``flakeforge`` console script (or falls back to
+    ``python -m flakeforge``) against the ``cli_only`` example fixture and
     asserts the expected violation code ``X005`` is reported with exit code 1.
     """
     scenario_dir = _EXAMPLES_DIR / "cli_only"
@@ -116,7 +116,7 @@ def test_pytest_helper_failure_message_surfaces_violation_codes() -> None:
 
     Runs the embedded ``test_lint.py`` inside ``both_modes_parity`` as an
     isolated subprocess.  When violations exist, pytest captures the
-    ``AssertionError`` message from :func:`flake8_lint.testing.assert_lint_clean`
+    ``AssertionError`` message from :func:`flakeforge.testing.assert_lint_clean`
     and writes it to stdout.  If the formatting ever regresses (empty message,
     missing codes, etc.) this test catches it before the on-call engineer hits
     the cryptic failure in production CI.

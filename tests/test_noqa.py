@@ -1,7 +1,7 @@
 import ast
 
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation, check_tree
-from flake8_lint.config import LintConfig
+from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_tree
+from flakeforge.config import LintConfig
 
 SOURCE = "\n".join(
     [

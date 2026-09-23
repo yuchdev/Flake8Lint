@@ -32,13 +32,13 @@ for point-in-time reviews.
 
 > **SME REVIEW NEEDED (AI-drafted - verify before relying on this):**
 >
-> ## Draft threat model - `flake8-lint` core
+> ## Draft threat model - `flakeforge` core
 >
 > ### 1. Scope
 >
-> The whole distribution: `src/flake8_lint/` (`api.py`, `registry.py`, `rules.py`, `config.py`,
-> `discovery.py`, `cli.py`, `plugin.py`, `testing.py`), the `flake8-lint` console script, and the
-> `flake8.extension` / `flake8_lint.rules` entry points. Trust boundaries crossed:
+> The whole distribution: `src/flakeforge/` (`api.py`, `registry.py`, `rules.py`, `config.py`,
+> `discovery.py`, `cli.py`, `plugin.py`, `testing.py`), the `flakeforge` console script, and the
+> `flake8.extension` / `flakeforge.rules` entry points. Trust boundaries crossed:
 >
 > - **Scanned repository → engine.** `api.check_file` reads arbitrary `.py` text
 >   (`read_text(encoding="utf-8")`) and hands it to `ast.parse`; `discovery.discover_python_files`
@@ -48,7 +48,7 @@ for point-in-time reviews.
 >   can be discovered and honored.
 > - **Config / installed package → Python import.** `registry._load_register_function` calls
 >   `import_module(module_name)` on `rule_modules` values; `resolve_registry` calls
->   `entry_point.load()` on every installed `flake8_lint.rules` provider.
+>   `entry_point.load()` on every installed `flakeforge.rules` provider.
 > - **Engine → operator output.** `format_text`/`format_json` to stdout, warnings and errors to
 >   stderr via `print()` in `cli.py`.
 >
@@ -73,9 +73,9 @@ for point-in-time reviews.
 >
 > - **A hostile repository** being linted (e.g. an untrusted PR, a vendored dependency, an
 >   automated scan of third-party code) - controls all `.py` text, all `# noqa` comments, and any
->   `pyproject.toml`/`flake8_lint.toml` in or above the tree.
+>   `pyproject.toml`/`flakeforge.toml` in or above the tree.
 > - **A malicious or compromised rule-provider package** published to PyPI declaring a
->   `flake8_lint.rules` entry point.
+>   `flakeforge.rules` entry point.
 > - **A contributor to a consuming project** who wants a banned pattern to pass CI and can edit
 >   config or add `# noqa` comments.
 >
@@ -85,10 +85,10 @@ for point-in-time reviews.
 > |---|---|---|
 > | **Spoofing** | Low. No identities or auth. A provider can claim any `provider=` label in `RuleRegistration`, which only affects error text. | `registry.py` `register()` |
 > | **Tampering** | **Highest-value class.** A hostile repo can weaken its own lint verdict via an upward-discovered config (`select`/`ignore`/`exclude`/`allow_noqa`), or via `# noqa` comments parsed from the scanned source. Mitigated only if the operator pins `--config` and/or sets `noqa_forbidden`. | `config._iter_candidate_directories`, `api._parse_noqa_codes`, `api._path_allows_noqa` |
-> | **Repudiation** | Low, but note there is **no logging at all** - `logging` is imported nowhere in `src/`. There is no audit trail of which config file, which providers, or which rule set produced a verdict. `config_path` is captured on `LintConfig` but never printed. | absence of `logging` in `src/flake8_lint/` |
+> | **Repudiation** | Low, but note there is **no logging at all** - `logging` is imported nowhere in `src/`. There is no audit trail of which config file, which providers, or which rule set produced a verdict. `config_path` is captured on `LintConfig` but never printed. | absence of `logging` in `src/flakeforge/` |
 > | **Information disclosure** | Moderate. Rule messages are static strings from `builtin_registrations()` and never quote source text - a good existing control that must be preserved. Absolute paths can leak via `_display_filename`'s fallback. `RuleExecutionError`/`RuleProviderLoadError` interpolate third-party exception text (`f"...: {exc}"`). | `rules.py`, `api._display_filename`, `api.py:96-99`, `registry.py:108-124` |
 > | **Denial of service** | Moderate and unmitigated. `ast.parse` on adversarially nested source can raise `RecursionError` or exhaust memory; `lint_paths` accumulates all violations in one unbounded list; `_is_noqa_suppressed` re-`splitlines()` the whole file per violation (quadratic); `rules.py` runs one full `ast.walk` per enabled rule. No timeouts, size caps, or recursion limits anywhere. Impact is a hung/OOM CI job, not compromise. | `api.check_file`, `api.lint_paths`, `api._is_noqa_suppressed` |
-> | **Elevation of privilege** | **The one path to code execution.** `rule_modules` → `import_module()` and installed entry points → `entry_point.load()` run arbitrary module-level code in the host interpreter. A repo-local `pyproject.toml` setting `rule_modules = ["evil"]` executes `evil` on `flake8-lint check`, subject to `sys.path`. This is the same trust model as most Python linters, but it must be stated, not assumed. | `registry._load_register_function`, `registry.resolve_registry` |
+> | **Elevation of privilege** | **The one path to code execution.** `rule_modules` → `import_module()` and installed entry points → `entry_point.load()` run arbitrary module-level code in the host interpreter. A repo-local `pyproject.toml` setting `rule_modules = ["evil"]` executes `evil` on `flakeforge check`, subject to `sys.path`. This is the same trust model as most Python linters, but it must be stated, not assumed. | `registry._load_register_function`, `registry.resolve_registry` |
 >
 > ### 5. Mitigations
 >
@@ -122,5 +122,5 @@ for point-in-time reviews.
 >
 > **Draft: MEDIUM.** Nothing here blocks merge, and the code-execution path matches the accepted
 > trust model for Python linters. Items 1 and 2 above are the ones a reviewer should rule on
-> first, since together they mean `flake8-lint check` on an untrusted checkout is a
+> first, since together they mean `flakeforge check` on an untrusted checkout is a
 > code-execution decision the operator is not currently warned about.

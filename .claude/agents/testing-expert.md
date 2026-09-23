@@ -11,7 +11,7 @@ A missed bug here surfaces downstream as silently wrong behavior in production, 
 be rigorous. 
 
 Concretely, a missed bug here means a rule stops firing and nobody notices, because a green
-`flake8-lint check` is indistinguishable from a genuinely clean codebase. If a matcher in
+`flakeforge check` is indistinguishable from a genuinely clean codebase. If a matcher in
 `rules.py` narrows by accident, or `api._parse_noqa_codes` mis-reads a `# noqa` comment, or
 `_matches_code_prefix` mishandles a `select` prefix, or `discovery._path_allowed` filters out a
 file it should have scanned, then the CLI exits `0` and every consuming project's CI gate passes
@@ -67,7 +67,7 @@ requires a matching sample file under `tests/samples/`, and any change to the ex
 - Directory convention (this repo's default - adjust if your project differs): unit tests in
   `tests/unit/` (CI-gated), integration tests in `tests/integration/`, and end-to-end tests in
   `tests/e2e/`, with shared fixtures under `tests/unit/fixtures/`.
-- Coverage baseline: `uv run pytest tests/unit/ -q --cov=flake8_lint --cov-report=term-missing`.
+- Coverage baseline: `uv run pytest tests/unit/ -q --cov=flakeforge --cov-report=term-missing`.
 
 ## What you produce for every new feature
 
@@ -92,7 +92,7 @@ requires a matching sample file under `tests/samples/`, and any change to the ex
 Run these unconditionally, in order, before reporting the work done:
 
 1. `uv run ruff check . --fix && uv run ruff check .`
-2. `uv run pytest -q --cov=flake8_lint --cov-report=term-missing`
+2. `uv run pytest -q --cov=flakeforge --cov-report=term-missing`
 
 After each command, read its output and act on it: fix every warning/error it left behind (including in fixtures/conftest, not just the new test file). If a fix isn't obviously safe - it would mask a real failure, change what a test asserts, or the correct resolution is ambiguous - stop and ask the user rather than guessing or suppressing it. Never delete or `xfail` a test to make this go green - escalate to `python-expert` if the cause is a product bug, not a test bug.
 

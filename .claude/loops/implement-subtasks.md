@@ -151,7 +151,7 @@ pasting a spec bills it twice (once in your context, once in theirs):
   §"Architecture" gives the per-module ownership boundaries, and §"Commands" the exact test/lint
   invocations. `.github/copilot-instructions.md` restates the same rules as a short checklist and
   is the cheaper read when an agent only needs the constraints. Note there is **no
-  logging/redaction utility to name** - `src/flake8_lint/` imports `logging` nowhere; the only
+  logging/redaction utility to name** - `src/flakeforge/` imports `logging` nowhere; the only
   output sinks are `print()` in `cli.py` (stdout for results, stderr for warnings and errors) and
   the `AssertionError` raised by `testing.assert_lint_clean`. If the milestone's `plan.md` carries
   its own cross-cutting guidelines section, name it for the agent to read.
@@ -218,9 +218,9 @@ do not spawn an agent that can only find nothing.** Each gate is module-scoped, 
 
 | Condition                                                | Skill                                                                                                                                |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| Always                                                   | `/test-gap src/flake8_lint/<subtask-module>/` - report coverage delta; if < 85 % delegate missing tests to `testing-expert`. |
+| Always                                                   | `/test-gap src/flakeforge/<subtask-module>/` - report coverage delta; if < 85 % delegate missing tests to `testing-expert`. |
 | `pyproject.toml` or any `requirements*.txt` changed      | `/dep-audit`                                                                                                                         |
-| Any file under an API route, auth, or middleware path changed, or anywhere handling credentials/tokens | `/secret-scan src/flake8_lint/<changed-module>/` |
+| Any file under an API route, auth, or middleware path changed, or anywhere handling credentials/tokens | `/secret-scan src/flakeforge/<changed-module>/` |
 | Subtask touches docs / public API                        | `/link-check docs/` - inbound references still resolve.                                                                              |
 
 ### Step 7 - record the subtask, then check the task
@@ -243,7 +243,7 @@ do not spawn an agent that can only find nothing.** Each gate is module-scoped, 
 
 - **Task not yet complete** → go to Step 8 (reschedule for the next subtask).
 - **Task complete** → this is the **one** place the whole suite runs: execute
-  `uv run pytest tests/unit/ -q --cov=flake8_lint` once (summary line only), then run
+  `uv run pytest tests/unit/ -q --cov=flakeforge` once (summary line only), then run
   `/pr-review` (must reach LGTM or have REQUEST_CHANGES resolved). Then update
   `{milestone_path}/status.md` `## Current status` with a **targeted row edit**:
   - Set the task row's Status cell to `✅ Complete` (note any deferred subtasks inline,

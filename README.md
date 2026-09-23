@@ -1,12 +1,15 @@
-# flake8-lint
+# flakeforge
 
 Reusable AST-based Python lint rules with a standalone CLI, a thin Flake8 adapter, explicit pytest helpers, and first-class custom-rule support.
 
+> Formerly `flake8-lint`. Renamed to `flakeforge` to read as an extension of Flake8 rather than
+> Flake8 itself — see the [migration note](#renamed-from-flake8-lint) below.
+
 ## What it is
 
-`flake8-lint` packages the copied `flake8_project_rules` behavior as a reusable distribution:
+`flakeforge` packages the copied `flake8_project_rules` behavior as a reusable distribution:
 
-- standalone `flake8-lint check`
+- standalone `flakeforge check`
 - shared Python API
 - built-in X001–X014 rules, all enabled by default
 - project-local and installed custom rules
@@ -16,7 +19,7 @@ Reusable AST-based Python lint rules with a standalone CLI, a thin Flake8 adapte
 ## Installation
 
 ```bash
-pip install flake8-lint
+pip install flakeforge
 ```
 
 For local development:
@@ -28,15 +31,15 @@ pip install -e .[dev]
 ## Basic CLI usage
 
 ```bash
-flake8-lint --version
-flake8-lint check
-flake8-lint check .
-flake8-lint check src tests
-flake8-lint check path/to/file.py
-flake8-lint check --select X002 --ignore X011 src
-flake8-lint check --output-format json .
-flake8-lint check --rule-module my_project.lint_rules .
-flake8-lint check --no-rule-plugins .
+flakeforge --version
+flakeforge check
+flakeforge check .
+flakeforge check src tests
+flakeforge check path/to/file.py
+flakeforge check --select X002 --ignore X011 src
+flakeforge check --output-format json .
+flakeforge check --rule-module my_project.lint_rules .
+flakeforge check --no-rule-plugins .
 ```
 
 Exit codes:
@@ -48,7 +51,7 @@ Exit codes:
 ## `pyproject.toml` configuration
 
 ```toml
-[tool.flake8_lint]
+[tool.flakeforge]
 include = []
 exclude = []
 select = []
@@ -59,13 +62,15 @@ noqa_forbidden = []
 rule_modules = []
 ```
 
-Legacy `[tool.flake8_lint_tests]` is still accepted as a 1.0.0 migration fallback when the canonical section is absent. The CLI warns:
+Legacy `[tool.flake8_lint]` is still accepted as a migration fallback when the canonical section
+is absent — the same way `[tool.flake8_lint_tests]` was accepted as a fallback for
+`[tool.flake8_lint]` before this rename (that older fallback is now retired). The CLI warns:
 
 ```text
-[tool.flake8_lint_tests] is deprecated; rename it to [tool.flake8_lint].
+[tool.flake8_lint] is deprecated; rename it to [tool.flakeforge].
 ```
 
-## `flake8_lint.toml` configuration
+## `flakeforge.toml` configuration
 
 ```toml
 include = []
@@ -81,9 +86,9 @@ rule_modules = []
 Discovery precedence:
 
 1. `--config PATH`
-2. `flake8_lint.toml`
-3. `pyproject.toml` with `[tool.flake8_lint]`
-4. `pyproject.toml` with `[tool.flake8_lint_tests]`
+2. `flakeforge.toml`
+3. `pyproject.toml` with `[tool.flakeforge]`
+4. `pyproject.toml` with `[tool.flake8_lint]` (deprecated)
 5. defaults
 
 `include` is a whitelist. `exclude` is a blacklist and wins. `select` is a whitelist. `ignore` is a blacklist and wins. `noqa_allowed` and `noqa_forbidden` are path filters for files allowed to use `# noqa`; `noqa_forbidden` wins.
@@ -145,7 +150,7 @@ Minimal project-local registration:
 ```python
 # my_project/lint_rules.py
 import ast
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation
+from flakeforge import RuleContext, RuleRegistry, RuleViolation
 
 
 class NoPrintRule:
@@ -169,19 +174,19 @@ def register_rules(registry: RuleRegistry) -> None:
 ```
 
 ```toml
-[tool.flake8_lint]
+[tool.flakeforge]
 rule_modules = ["my_project.lint_rules"]
 ```
 
-Reusable provider packages can also register through the `flake8_lint.rules` Python entry-point group. See [docs/custom-rules.md](docs/custom-rules.md).
+Reusable provider packages can also register through the `flakeforge.rules` Python entry-point group. See [docs/custom-rules.md](docs/custom-rules.md).
 
 ## Flake8 integration
 
-`flake8-lint` registers a Flake8 AST plugin entry point. The adapter is intentionally thin:
+`flakeforge` registers a Flake8 AST plugin entry point. The adapter is intentionally thin:
 
 - built-in diagnostics come from the same shared engine used by the CLI/API
 - Flake8 selection and `--disable-noqa` map into the shared engine
-- installed `flake8_lint.rules` providers remain authoritative for the standalone CLI/API
+- installed `flakeforge.rules` providers remain authoritative for the standalone CLI/API
 - third-party packages that need native Flake8 discovery should also expose their own Flake8 entry points
 
 ## pytest integration
@@ -189,25 +194,40 @@ Reusable provider packages can also register through the `flake8_lint.rules` Pyt
 Pytest integration is explicit:
 
 ```python
-from flake8_lint.testing import assert_lint_clean
+from flakeforge.testing import assert_lint_clean
 
 
 def test_project_lint() -> None:
     assert_lint_clean("src", "tests")
 ```
 
-Installing `flake8-lint` alone does not auto-run repository lint during ordinary `pytest`.
+Installing `flakeforge` alone does not auto-run repository lint during ordinary `pytest`.
 
 ## CI recommendation
 
 Prefer separate steps or jobs:
 
 ```bash
-flake8-lint check .
+flakeforge check .
 pytest
 ```
 
 That keeps unit and integration tests running even when lint finds violations.
+
+## Renamed from flake8-lint
+
+This project was initially released as `flake8-lint` and was later renamed to `flakeforge` to
+avoid it reading as "flake8 itself" rather than an extension of it.
+If you depend on an older release or a pre-rename commit:
+
+- the import package is `flakeforge` (was `flake8_lint`)
+- the console script is `flakeforge` (was `flake8-lint`)
+- the canonical config section is `[tool.flakeforge]` / `flakeforge.toml` (was `[tool.flake8_lint]` /
+  `flake8_lint.toml`) — `[tool.flake8_lint]` is still accepted as a deprecated fallback, same as
+  any other config migration (see the precedence list above)
+- the custom-rule entry-point group is `flakeforge.rules` (was `flake8_lint.rules`)
+
+No rule code, rule behaviour, or public API shape changed - only names.
 
 ## Migration from the copied implementation
 
@@ -224,30 +244,30 @@ tests/flake8_lint/samples/
 Add dependency:
 
 ```text
-flake8-lint==1.0.0
+flakeforge==1.0.0
 ```
 
 Then:
 
 - remove `src/flake8_project_rules/`
-- remove copied package-implementation tests now owned by `flake8-lint`
+- remove copied package-implementation tests now owned by `flakeforge`
 - remove `test_project_lint.py` unless pytest should stay an explicit lint gate
-- rename `[tool.flake8_lint_tests]` to `[tool.flake8_lint]`
+- rename the legacy config section to `[tool.flakeforge]`
 - change CI from implicit pytest lint gating to:
 
 ```bash
-flake8-lint check .
+flakeforge check .
 pytest
 ```
 
-- update direct imports from `flake8_project_rules` to public `flake8_lint` APIs where needed
+- update direct imports from `flake8_project_rules` to public `flakeforge` APIs where needed
 
 ## Canonical migrated configuration example
 
 `pyproject.toml`:
 
 ```toml
-[tool.flake8_lint]
+[tool.flakeforge]
 
 include = []
 
@@ -291,7 +311,7 @@ noqa_forbidden = []
 rule_modules = []
 ```
 
-Equivalent `flake8_lint.toml`:
+Equivalent `flakeforge.toml`:
 
 ```toml
 include = []
@@ -333,7 +353,7 @@ rule_modules = []
 ## Development / build
 
 ```bash
-pytest --cov=flake8_lint --cov-report=term-missing
+pytest --cov=flakeforge --cov-report=term-missing
 ruff check .
 python -m build
 ```

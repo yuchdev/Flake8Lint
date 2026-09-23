@@ -424,7 +424,7 @@ wheels = [
 ]
 
 [[package]]
-name = "flake8-lint"
+name = "flakeforge"
 version = "1.0.0"
 source = { editable = "." }
 

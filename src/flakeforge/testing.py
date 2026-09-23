@@ -1,4 +1,4 @@
-"""Explicit pytest helper APIs for flake8-lint."""
+"""Explicit pytest helper APIs for flakeforge."""
 
 from __future__ import annotations
 

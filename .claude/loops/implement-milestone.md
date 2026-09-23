@@ -194,10 +194,10 @@ Seed `research_digest.exit_gates` with the four steps `.github/workflows/ci.yml`
 runs, plus the wheel-smoke job. These are the project's real gates; when a `plan.md` names no
 closing task, these are the gates:
 
-1. `pytest --cov=flake8_lint --cov-report=term-missing` - the full suite green. CI runs it on
+1. `pytest --cov=flakeforge --cov-report=term-missing` - the full suite green. CI runs it on
    Python 3.11, 3.12, 3.13, and 3.14; locally one interpreter is the practical bar.
 2. `ruff check .` - clean (`select = ["E", "F", "I"]`, `line-length = 100`).
-3. `python -m flake8_lint check --select X001,X009,X010 src` - the self-check subset. The tool
+3. `python -m flakeforge check --select X001,X009,X010 src` - the self-check subset. The tool
    must pass its own rules.
 4. `python -m build` - sdist and wheel build.
 5. The `wheel-smoke` job's script in `.github/workflows/ci.yml`, if the milestone touched CLI
@@ -385,7 +385,7 @@ This project's bar is wider than the implement-subtasks default at both levels, 
 live in one flat `tests/` directory (`testpaths = ["tests"]`) - there is no separate unit vs.
 integration suite to run selectively, so "the suite" always means all of `tests/`.
 
-**Task complete** = `pytest --cov=flake8_lint --cov-report=term-missing` green **and**
+**Task complete** = `pytest --cov=flakeforge --cov-report=term-missing` green **and**
 `ruff check .` clean **and** `/pr-review` LGTM. Ruff is a CI step, so a task that leaves lint
 dirty is not done. No coverage percentage is enforced - report the delta, do not gate on it.
 

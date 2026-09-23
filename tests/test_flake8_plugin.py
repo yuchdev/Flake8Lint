@@ -1,8 +1,8 @@
 import ast
 from types import SimpleNamespace
 
-import flake8_lint.plugin as plugin_module
-from flake8_lint.plugin import ProjectRulesPlugin
+import flakeforge.plugin as plugin_module
+from flakeforge.plugin import ProjectRulesPlugin
 
 
 def test_flake8_plugin_uses_shared_engine(tmp_path) -> None:
@@ -13,7 +13,7 @@ def test_flake8_plugin_uses_shared_engine(tmp_path) -> None:
             ignore=(),
             extend_ignore=(),
             disable_noqa=False,
-            flake8_lint_no_noqa=False,
+            flakeforge_no_noqa=False,
         )
     )
     sample = tmp_path / "sample.py"
@@ -47,7 +47,7 @@ def test_flake8_plugin_respects_prefix_select_and_ignore(tmp_path) -> None:
             ignore=("X002",),
             extend_ignore=(),
             disable_noqa=False,
-            flake8_lint_no_noqa=False,
+            flakeforge_no_noqa=False,
         )
     )
     sample = tmp_path / "sample.py"
@@ -73,7 +73,7 @@ def test_flake8_plugin_respects_disable_noqa_option(tmp_path) -> None:
             ignore=(),
             extend_ignore=(),
             disable_noqa=True,
-            flake8_lint_no_noqa=False,
+            flakeforge_no_noqa=False,
         )
     )
     sample = tmp_path / "sample.py"
@@ -101,7 +101,7 @@ def test_flake8_plugin_disables_x_rules_when_flake8_selects_other_families(tmp_p
             ignore=(),
             extend_ignore=(),
             disable_noqa=False,
-            flake8_lint_no_noqa=False,
+            flakeforge_no_noqa=False,
         )
     )
     sample = tmp_path / "sample.py"
@@ -132,7 +132,7 @@ def test_flake8_plugin_uses_cached_registry(monkeypatch, tmp_path) -> None:
             ignore=(),
             extend_ignore=(),
             disable_noqa=False,
-            flake8_lint_no_noqa=False,
+            flakeforge_no_noqa=False,
         )
     )
     sample = tmp_path / "sample.py"

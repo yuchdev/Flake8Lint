@@ -1,4 +1,4 @@
-"""Typed configuration loading for flake8-lint."""
+"""Typed configuration loading for flakeforge."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
-LEGACY_SECTION_WARNING = "[tool.flake8_lint_tests] is deprecated; rename it to [tool.flake8_lint]."
+LEGACY_SECTION_WARNING = "[tool.flake8_lint] is deprecated; rename it to [tool.flakeforge]."
 
 
 class ConfigValidationError(ValueError):
@@ -126,7 +126,7 @@ def load_config(
     """Locate and load the effective lint configuration.
 
     :param config_path: Explicit config file; when omitted the parent
-        directories of *cwd* are searched for ``flake8_lint.toml`` or a
+        directories of *cwd* are searched for ``flakeforge.toml`` or a
         ``pyproject.toml`` carrying a recognised section.
     :param cwd: Directory to start the search from; defaults to the process cwd.
     :returns: The loaded configuration, or an empty one anchored at *cwd*.
@@ -139,7 +139,7 @@ def load_config(
         return _load_path(path.resolve())
 
     for directory in _iter_candidate_directories(base):
-        explicit = directory / "flake8_lint.toml"
+        explicit = directory / "flakeforge.toml"
         if explicit.is_file():
             return _load_path(explicit)
 
@@ -158,9 +158,7 @@ def _load_path(path: Path) -> LintConfig:
     if path.name == "pyproject.toml":
         loaded = _load_pyproject(path, data=data)
         if loaded is None:
-            raise ConfigValidationError(
-                f"{path} does not define [tool.flake8_lint] or [tool.flake8_lint_tests]"
-            )
+            raise ConfigValidationError(f"{path} does not define [tool.flakeforge] or [tool.flake8_lint]")
         return loaded
     if not isinstance(data, dict):
         raise ConfigValidationError(f"{path} must contain a top-level TOML table")
@@ -210,20 +208,20 @@ def _load_pyproject(path: Path, *, data: Optional[dict[str, Any]] = None) -> Opt
     if not isinstance(tool_section, dict):
         raise ConfigValidationError(f"{path} has invalid [tool] data")
 
-    if "flake8_lint" in tool_section:
-        section = tool_section["flake8_lint"]
+    if "flakeforge" in tool_section:
+        section = tool_section["flakeforge"]
         if not isinstance(section, dict):
-            raise ConfigValidationError(f"{path} has invalid [tool.flake8_lint] data")
+            raise ConfigValidationError(f"{path} has invalid [tool.flakeforge] data")
         return LintConfig.from_mapping(
             section,
             base_dir=path.parent.resolve(),
             config_path=path.resolve(),
         )
 
-    if "flake8_lint_tests" in tool_section:
-        section = tool_section["flake8_lint_tests"]
+    if "flake8_lint" in tool_section:
+        section = tool_section["flake8_lint"]
         if not isinstance(section, dict):
-            raise ConfigValidationError(f"{path} has invalid [tool.flake8_lint_tests] data")
+            raise ConfigValidationError(f"{path} has invalid [tool.flake8_lint] data")
         return LintConfig.from_mapping(
             section,
             base_dir=path.parent.resolve(),
@@ -273,8 +271,7 @@ def _validate_rule_selectors(
 
     if unknown and legacy_mode:
         warnings.append(
-            f"Ignoring unknown legacy {field_name} entr{'y' if len(unknown) == 1 else 'ies'}: "
-            + ", ".join(unknown)
+            f"Ignoring unknown legacy {field_name} entr{'y' if len(unknown) == 1 else 'ies'}: " + ", ".join(unknown)
         )
         return tuple(valid)
     if unknown:

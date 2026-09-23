@@ -8,7 +8,7 @@ Unless the user has said this is intentional work-in-progress, run these checks 
 
 1. `uv run ruff check . --fix`
 2. `uv run ruff check .`
-3. `uv run pytest -q --cov=flake8_lint --cov-report=term-missing`
+3. `uv run pytest -q --cov=flakeforge --cov-report=term-missing`
 
 If Markdown changed, also run `/link-check` on the affected docs or the full documentation corpus as appropriate.
 

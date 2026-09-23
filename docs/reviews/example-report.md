@@ -1,6 +1,6 @@
 # Example efficiency audit - 2026-01-05
 
-**Scope:** `src/flake8_lint/ingest/` (files touched by the last 2 weeks
+**Scope:** `src/flakeforge/ingest/` (files touched by the last 2 weeks
 of commits).
 
 ## Findings

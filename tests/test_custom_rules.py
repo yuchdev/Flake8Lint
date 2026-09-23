@@ -3,9 +3,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation, check_source
-from flake8_lint.config import LintConfig
-from flake8_lint.registry import (
+from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_source
+from flakeforge.config import LintConfig
+from flakeforge.registry import (
     DuplicateRuleCodeError,
     InvalidRuleCodeError,
     RuleProviderLoadError,
@@ -37,7 +37,7 @@ def test_project_local_rule_module_registers_rules(tmp_path, monkeypatch) -> Non
     (package / "lint_rules.py").write_text(
         textwrap.dedent(
             """
-            from flake8_lint import RuleRegistry, RuleViolation
+            from flakeforge import RuleRegistry, RuleViolation
 
             class NoPrintRule:
                 code = "ORG001"
@@ -138,7 +138,7 @@ class FakeEntryPoint:
 
 class FakeEntryPoints(list):
     def select(self, *, group: str):
-        assert group == "flake8_lint.rules"
+        assert group == "flakeforge.rules"
         return self
 
 
@@ -164,7 +164,7 @@ def test_installed_provider_entry_points_are_loaded_deterministically(monkeypatc
         registry.register(FirstRule(), provider="pkg.first")
 
     monkeypatch.setattr(
-        "flake8_lint.registry.metadata.entry_points",
+        "flakeforge.registry.metadata.entry_points",
         lambda: FakeEntryPoints(
             [
                 FakeEntryPoint("zzz", "pkg.second:register_rules", register_second),
@@ -183,7 +183,7 @@ def test_installed_provider_load_error_names_provider(monkeypatch) -> None:
         raise RuntimeError("broken provider")
 
     monkeypatch.setattr(
-        "flake8_lint.registry.metadata.entry_points",
+        "flakeforge.registry.metadata.entry_points",
         lambda: FakeEntryPoints([FakeEntryPoint("boom", "pkg.boom:register_rules", boom)]),
     )
     with pytest.raises(RuleProviderLoadError, match="boom"):

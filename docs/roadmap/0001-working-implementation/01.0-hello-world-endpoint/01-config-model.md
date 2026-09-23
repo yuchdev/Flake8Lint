@@ -6,10 +6,10 @@
 ## Requirements
 
 - Add a `HealthConfig` settings model with a `service_name: str` field,
-  defaulting to `"flake8_lint"`.
+  defaulting to `"flakeforge"`.
 - Load it the same way other config sections are loaded in this project.
 
 ## Files
 
-- `src/flake8_lint/config/health.py` - new `HealthConfig` model.
+- `src/flakeforge/config/health.py` - new `HealthConfig` model.
 - `tests/unit/test_health_config.py` - default value + override test.

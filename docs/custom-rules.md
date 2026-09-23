@@ -7,7 +7,7 @@ Use a custom rule when a project needs additional AST checks beyond the built-in
 Import from the package root:
 
 ```python
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation, check_source, lint_paths
+from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_source, lint_paths
 ```
 
 These names are the supported extension surface for 1.0.0.
@@ -26,7 +26,7 @@ Example:
 import ast
 from collections.abc import Iterable
 
-from flake8_lint import RuleContext, RuleViolation
+from flakeforge import RuleContext, RuleViolation
 
 
 class NoPrintRule:
@@ -91,7 +91,7 @@ Project-local modules register rules explicitly:
 # my_project/lint_rules.py
 import ast
 
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation
+from flakeforge import RuleContext, RuleRegistry, RuleViolation
 
 
 class NoPrintRule:
@@ -117,31 +117,31 @@ def register_rules(registry: RuleRegistry) -> None:
 Enable the module with config:
 
 ```toml
-[tool.flake8_lint]
+[tool.flakeforge]
 rule_modules = ["my_project.lint_rules"]
 ```
 
 or CLI:
 
 ```bash
-flake8-lint check --rule-module my_project.lint_rules .
+flakeforge check --rule-module my_project.lint_rules .
 ```
 
 Module import failures are reported as tool/configuration errors and name the module plus the original exception.
 
 ## Installed provider packages
 
-Reusable packages register through the `flake8_lint.rules` entry-point group:
+Reusable packages register through the `flakeforge.rules` entry-point group:
 
 ```toml
-[project.entry-points."flake8_lint.rules"]
+[project.entry-points."flakeforge.rules"]
 acme = "acme_flake8_rules:register_rules"
 ```
 
 The target must be a callable with signature equivalent to:
 
 ```python
-from flake8_lint import RuleRegistry
+from flakeforge import RuleRegistry
 
 
 def register_rules(registry: RuleRegistry) -> None:
@@ -151,7 +151,7 @@ def register_rules(registry: RuleRegistry) -> None:
 Provider loading is deterministic by entry-point name and target. Provider load failures report the provider name and target, plus the underlying exception. For reproducibility or debugging, disable installed providers with:
 
 ```bash
-flake8-lint check --no-rule-plugins .
+flakeforge check --no-rule-plugins .
 ```
 
 ## Shared execution behavior
@@ -181,8 +181,8 @@ Suppression still depends on global `allow_noqa` plus the `noqa_allowed` / `noqa
 Provider authors can test a rule without a project scan:
 
 ```python
-from flake8_lint import check_source
-from flake8_lint.config import LintConfig
+from flakeforge import check_source
+from flakeforge.config import LintConfig
 
 
 violations = check_source(
@@ -202,8 +202,8 @@ To test project-local registration or file discovery:
 ```python
 from pathlib import Path
 
-from flake8_lint import lint_paths
-from flake8_lint.config import LintConfig
+from flakeforge import lint_paths
+from flakeforge.config import LintConfig
 
 
 result = lint_paths(
@@ -228,7 +228,7 @@ The 1.0.0 public custom-rule API guarantees:
 
 Not guaranteed through native Flake8 integration:
 
-- automatic loading of `flake8_lint.rules` providers inside Flake8 itself
+- automatic loading of `flakeforge.rules` providers inside Flake8 itself
 - universal equivalence with arbitrary third-party Flake8 plugin-selection behavior
 
 If a third-party package needs direct Flake8 discovery, it should also expose its own Flake8 entry point.

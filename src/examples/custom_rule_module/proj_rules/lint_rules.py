@@ -3,7 +3,7 @@
 import ast
 from collections.abc import Iterable
 
-from flake8_lint import RuleContext, RuleRegistry, RuleViolation
+from flakeforge import RuleContext, RuleRegistry, RuleViolation
 
 
 class NoPrintRule:
