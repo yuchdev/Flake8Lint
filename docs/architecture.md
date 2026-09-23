@@ -17,10 +17,10 @@
 
 ## Core rules / registry
 
-- `flake8_lint.rules` defines the built-in X001–X012 rules.
+- `flake8_lint.rules` defines the built-in X001–X014 rules.
 - `flake8_lint.registry` owns registration, duplicate detection, rule-code validation, and provider loading.
 - Built-in rules are registered through the same registry mechanism used by custom rules.
-- `X003` is kept in the authoritative registry as known but disabled/reserved.
+- `X003` detects circular imports by resolving each module's runtime imports against the import root.
 
 That shared registration path matters because extension behavior should exercise the real engine path instead of a separate bolt-on custom-rule system.
 

@@ -8,7 +8,7 @@ Reusable AST-based Python lint rules with a standalone CLI, a thin Flake8 adapte
 
 - standalone `flake8-lint check`
 - shared Python API
-- built-in X001–X012 rules with reserved `X003`
+- built-in X001–X014 rules, all enabled by default
 - project-local and installed custom rules
 - opt-in pytest helper
 - thin Flake8 integration over the same core engine
@@ -92,7 +92,7 @@ Discovery precedence:
 
 - `X001` bare `except:`
 - `X002` `except Exception:`
-- `X003` reserved/disabled
+- `X003` circular imports between project modules
 - `X004` silently swallowed exceptions
 - `X005` missing or malformed docstrings
 - `X006` local imports inside functions or classes
@@ -102,6 +102,22 @@ Discovery precedence:
 - `X010` suppressed `ImportError` / `ModuleNotFoundError`
 - `X011` `Type | None` instead of `Optional[Type]`
 - `X012` non-`None` PEP 604 unions like `Type1 | Type2` instead of `Union[...]`
+- `X013` `subprocess.Popen`/`socket.socket` not used as a context manager
+- `X014` malformed or untracked `TODO`/`FIXME` comments
+
+### `X003` circular imports
+
+`X003` resolves each module's runtime imports against its import root - the first directory above the module that is not a package - and reports any import that takes part in a cycle leading back to the module being checked. Every module in a cycle is flagged, each at its own offending import line, and the message names the full chain:
+
+```text
+src/pkg/alpha.py:3:0: X003 Circular import detected: pkg.alpha -> pkg.beta -> pkg.alpha; ...
+```
+
+These are deliberately *not* treated as cycle edges, because Python does not run them while first importing the module:
+
+- imports inside a function body, which is the standard way to break a cycle
+- imports guarded by `if TYPE_CHECKING:`
+- targets that do not resolve to a file under the import root, so the standard library and third-party packages are never traversed
 
 ## `# noqa` semantics
 
@@ -248,6 +264,7 @@ exclude = [
 select = [
     "X001",
     "X002",
+    "X003",
     "X004",
     "X005",
     "X006",
@@ -257,9 +274,11 @@ select = [
     "X010",
     "X011",
     "X012",
+    "X013",
+    "X014",
 ]
 
-ignore = ["X003"]
+ignore = []
 
 allow_noqa = true
 
@@ -290,6 +309,7 @@ exclude = [
 select = [
     "X001",
     "X002",
+    "X003",
     "X004",
     "X005",
     "X006",
@@ -299,9 +319,11 @@ select = [
     "X010",
     "X011",
     "X012",
+    "X013",
+    "X014",
 ]
 
-ignore = ["X003"]
+ignore = []
 allow_noqa = true
 noqa_allowed = ["src/aegis_swr/core/events.py"]
 noqa_forbidden = []

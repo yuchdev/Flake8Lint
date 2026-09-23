@@ -1,6 +1,6 @@
 # Custom Rules
 
-Use a custom rule when a project needs additional AST checks beyond the built-in X001–X012 catalogue.
+Use a custom rule when a project needs additional AST checks beyond the built-in X001–X014 catalogue.
 
 ## Supported public imports
 
@@ -81,7 +81,7 @@ Examples:
 - valid: `ACME001`, `SEC001`, `ARCH101`
 - invalid: `acme001`, `001`, `ACME01`
 
-Duplicate codes are errors, including collisions with built-in `X001`–`X012`.
+Duplicate codes are errors, including collisions with built-in `X001`–`X014`.
 
 ## Project-local registration
 

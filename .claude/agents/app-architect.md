@@ -25,7 +25,7 @@ The package has **zero runtime dependencies** (`pyproject.toml` `dependencies = 
 - `RuleContext` (`api.py`) — `tree`, `filename`, `source`. The *entire* contract a rule sees; `source` may be `None`, in which case `# noqa` cannot be applied.
 - `RuleViolation` (`api.py`) — `filename`, `lineno`, `col_offset`, `code`, `message`. Emitted by rules, rewritten with a display-relative `filename` in `lint_paths()`, and serialized verbatim by `format_json()`.
 - `LintResult` (`api.py`) — `violations` tuple plus `files_checked`, with an `ok` property that drives the CLI exit code.
-- `RuleRegistration` (`registry.py`) — `code`, `description`, `rule`, `provider`, `enabled`, `reserved`. `X003` is registered `enabled=False, reserved=True`.
+- `RuleRegistration` (`registry.py`) — `code`, `description`, `rule`, `provider`, `enabled`, `reserved`. `X003` is the circular-import rule, registered enabled like every other built-in.
 
 **Entry points:**
 

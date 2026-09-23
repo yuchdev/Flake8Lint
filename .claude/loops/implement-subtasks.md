@@ -142,8 +142,8 @@ pasting a spec bills it twice (once in your context, once in theirs):
   RAII, this project's log-redaction mechanism (if it has one), no bare `except:`, unit +
   mocked-integration tests.
   Name `CLAUDE.md` §"Conventions specific to this repo" as well - it carries five rules the
-  coding standard does not: `X003` is permanently reserved and no existing `X`-code is ever
-  renumbered or reused; custom rule codes must be uppercase, alphanumeric-prefixed, and end in
+  coding standard does not: no existing `X`-code is ever renumbered or reused (`X003` detects
+  circular imports); custom rule codes must be uppercase, alphanumeric-prefixed, and end in
   exactly three digits, with duplicates being registry *errors*; adding a built-in rule requires
   a lockstep set of edits (registry entry, `rules.py` implementation, tests, a sample under
   `tests/samples/`, README/docs); `# noqa` handling is engine-owned in `api.py` and rules must
