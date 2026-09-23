@@ -1,6 +1,6 @@
 import pytest
 
-from flake8_lint.config import (
+from flakeforge.config import (
     LEGACY_SECTION_WARNING,
     ConfigValidationError,
     LintConfig,
@@ -12,9 +12,7 @@ from flake8_lint.config import (
 def test_load_config_from_pyproject_section(tmp_path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
-        "[tool.flake8_lint]\n"
-        'select = ["x002"]\n'
-        "allow_noqa = false\n",
+        '[tool.flakeforge]\nselect = ["x002"]\nallow_noqa = false\n',
         encoding="utf-8",
     )
     config = load_config(cwd=tmp_path)
@@ -22,9 +20,9 @@ def test_load_config_from_pyproject_section(tmp_path) -> None:
     assert config.base_dir == tmp_path
 
 
-def test_load_config_falls_back_to_legacy_tests_section(tmp_path) -> None:
+def test_load_config_falls_back_to_legacy_flake8_lint_section(tmp_path) -> None:
     pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text('[tool.flake8_lint_tests]\nignore = ["x003"]\n', encoding="utf-8")
+    pyproject.write_text('[tool.flake8_lint]\nignore = ["x003"]\n', encoding="utf-8")
     config = load_config(cwd=tmp_path)
     assert config.ignore == ("X003",)
     assert config.legacy_mode is True
@@ -33,10 +31,10 @@ def test_load_config_falls_back_to_legacy_tests_section(tmp_path) -> None:
 
 def test_load_config_prefers_standalone_toml_over_pyproject(tmp_path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.flake8_lint]\nselect = ["X001"]\n',
+        '[tool.flakeforge]\nselect = ["X001"]\n',
         encoding="utf-8",
     )
-    (tmp_path / "flake8_lint.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
     config = load_config(cwd=tmp_path)
     assert config.select == ("X002",)
 
@@ -46,7 +44,7 @@ def test_load_config_searches_upward_without_merging(tmp_path) -> None:
     nested = project / "pkg" / "subpkg"
     nested.mkdir(parents=True)
     (project / "pyproject.toml").write_text(
-        '[tool.flake8_lint]\nselect = ["X002"]\n',
+        '[tool.flakeforge]\nselect = ["X002"]\n',
         encoding="utf-8",
     )
     config = load_config(cwd=nested)
@@ -57,11 +55,11 @@ def test_load_config_searches_upward_without_merging(tmp_path) -> None:
 def test_explicit_config_path_is_loaded_relative_to_cwd(tmp_path) -> None:
     configs = tmp_path / "configs"
     configs.mkdir()
-    config_path = configs / "flake8_lint.toml"
+    config_path = configs / "flakeforge.toml"
     config_path.write_text('include = ["src"]\n', encoding="utf-8")
     cwd = tmp_path / "workspace"
     cwd.mkdir()
-    config = load_config("..//configs/flake8_lint.toml", cwd=cwd)
+    config = load_config("..//configs/flakeforge.toml", cwd=cwd)
     assert config.include == ("src",)
     assert config.base_dir == configs
 

@@ -1,5 +1,5 @@
-from flake8_lint.config import LintConfig
-from flake8_lint.discovery import discover_python_files
+from flakeforge.config import LintConfig
+from flakeforge.discovery import discover_python_files
 
 
 def test_discovery_skips_default_excluded_directories(tmp_path) -> None:

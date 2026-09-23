@@ -1,4 +1,4 @@
-"""Command-line interface for flake8-lint."""
+"""Command-line interface for flakeforge."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from .registry import resolve_registry
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser and its ``check`` subcommand."""
-    parser = argparse.ArgumentParser(prog="flake8-lint")
+    parser = argparse.ArgumentParser(prog="flakeforge")
     parser.add_argument("--version", action="store_true", help="Show package version and exit")
     subparsers = parser.add_subparsers(dest="command")
 
     check = subparsers.add_parser("check", help="Lint one or more files or directories")
     check.add_argument("paths", nargs="*")
-    check.add_argument("--config", help="Path to pyproject.toml or flake8_lint.toml")
+    check.add_argument("--config", help="Path to pyproject.toml or flakeforge.toml")
     check.add_argument("--select", action="append", default=[])
     check.add_argument("--ignore", action="append", default=[])
     check.add_argument("--no-noqa", action="store_true", help="Disable noqa suppression")
@@ -29,14 +29,14 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument(
         "--no-rule-plugins",
         action="store_true",
-        help="Disable installed flake8_lint.rules entry-point providers",
+        help="Disable installed flakeforge.rules entry-point providers",
     )
     check.add_argument("--output-format", choices=("text", "json"), default="text")
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """Run the ``flake8-lint`` CLI and return a process exit code.
+    """Run the ``flakeforge`` CLI and return a process exit code.
 
     :param argv: Optional argument vector; defaults to ``sys.argv`` when omitted.
     :returns: ``EXIT_OK`` when clean, ``EXIT_VIOLATIONS`` when violations are
@@ -45,7 +45,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.version:
-        print(f"flake8-lint {__version__}")
+        print(f"flakeforge {__version__}")
         return EXIT_OK
     if args.command != "check":
         parser.print_help()
@@ -65,7 +65,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             registry=registry,
         )
     except (OSError, ValueError, RuntimeError, SyntaxError) as exc:
-        print(f"flake8-lint: {exc}", file=sys.stderr)
+        print(f"flakeforge: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
     output = format_json(result) if args.output_format == "json" else format_text(result)
@@ -107,4 +107,4 @@ def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[st
 def _emit_warnings(config: LintConfig):
     """Print any accumulated configuration warnings to stderr."""
     for warning in config.warnings:
-        print(f"flake8-lint: {warning}", file=sys.stderr)
+        print(f"flakeforge: {warning}", file=sys.stderr)

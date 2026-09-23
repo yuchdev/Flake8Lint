@@ -10,7 +10,7 @@ You are the **Architect** for Flake8 Linter, Reusable AST-based Python lint rule
 
 ## Domain model you must hold in your context
 
-The package has **zero runtime dependencies** (`pyproject.toml` `dependencies = []`) and lives entirely under `src/flake8_lint/`. A shared execution core is wrapped by thin, replaceable integration surfaces; every design decision you make must preserve that the core never learns about its callers.
+The package has **zero runtime dependencies** (`pyproject.toml` `dependencies = []`) and lives entirely under `src/flakeforge/`. A shared execution core is wrapped by thin, replaceable integration surfaces; every design decision you make must preserve that the core never learns about its callers.
 
 **Layers, innermost first:**
 
@@ -29,15 +29,15 @@ The package has **zero runtime dependencies** (`pyproject.toml` `dependencies = 
 
 **Entry points:**
 
-- `flake8-lint` console script → `flake8_lint.cli:main` (`[project.scripts]`), and `python -m flake8_lint` via `__main__.py`. One subcommand, `check`, with `--config`, `--select`, `--ignore`, `--no-noqa`, `--rule-module`, `--no-rule-plugins`, `--output-format`.
+- `flakeforge` console script → `flakeforge.cli:main` (`[project.scripts]`), and `python -m flakeforge` via `__main__.py`. One subcommand, `check`, with `--config`, `--select`, `--ignore`, `--no-noqa`, `--rule-module`, `--no-rule-plugins`, `--output-format`.
 - Python API — the `__all__` in `__init__.py`: `check_file`, `check_source`, `check_tree`, `lint_paths`, `LintResult`, `Rule`, `RuleContext`, `RuleViolation`, `RuleRegistry`.
-- Flake8 plugin — `[project.entry-points."flake8.extension"] X0 = flake8_lint.plugin:ProjectRulesPlugin`.
-- pytest — `flake8_lint.testing.assert_lint_clean()`, opt-in only; import alone must never trigger a repo scan.
+- Flake8 plugin — `[project.entry-points."flake8.extension"] X0 = flakeforge.plugin:ProjectRulesPlugin`.
+- pytest — `flakeforge.testing.assert_lint_clean()`, opt-in only; import alone must never trigger a repo scan.
 
 **Pluggable families and boundaries:**
 
-- **Rule providers** are the one extension family. `resolve_registry()` composes exactly three tiers in order: built-ins → project-local `rule_modules` (imported via `import_module`, must expose `register_rules(registry)`) → installed `flake8_lint.rules` entry points (sorted by `(name, value)`), skippable with `--no-rule-plugins`. Loading is deterministic and fails fast: `RuleProviderLoadError` wraps import/registration failures, while `DuplicateRuleCodeError`/`InvalidRuleCodeError` propagate unwrapped.
-- **Config discovery precedence** is a contract: `--config PATH` > `flake8_lint.toml` > `pyproject.toml [tool.flake8_lint]` > legacy `[tool.flake8_lint_tests]` (warns, and downgrades unknown selectors to warnings instead of errors) > defaults. `config.py` never prints; callers decide presentation.
+- **Rule providers** are the one extension family. `resolve_registry()` composes exactly three tiers in order: built-ins → project-local `rule_modules` (imported via `import_module`, must expose `register_rules(registry)`) → installed `flakeforge.rules` entry points (sorted by `(name, value)`), skippable with `--no-rule-plugins`. Loading is deterministic and fails fast: `RuleProviderLoadError` wraps import/registration failures, while `DuplicateRuleCodeError`/`InvalidRuleCodeError` propagate unwrapped.
+- **Config discovery precedence** is a contract: `--config PATH` > `flakeforge.toml` > `pyproject.toml [tool.flakeforge]` > legacy `[tool.flake8_lint]` (warns, and downgrades unknown selectors to warnings instead of errors) > defaults. `config.py` never prints; callers decide presentation.
 - **`# noqa` is engine-owned.** Rules yield violations unconditionally; `api._is_noqa_suppressed` decides suppression from `allow_noqa` plus the `noqa_allowed`/`noqa_forbidden` path policy. Any design that pushes suppression into a rule breaks this boundary.
 - **The Flake8 adapter is intentionally narrower than the CLI**: `ProjectRulesPlugin` caches `resolve_registry(include_entry_points=False)` and does not claim installed-provider discovery. That asymmetry is deliberate — do not "fix" it without an ADR.
 - **Exit codes `0`/`1`/`2`** (`EXIT_OK`/`EXIT_VIOLATIONS`/`EXIT_ERROR` in `api.py`) are public API, asserted executably by the `wheel-smoke` job in `.github/workflows/ci.yml`.

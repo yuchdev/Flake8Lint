@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from importlib import import_module, metadata
 from typing import Any, Protocol
 
-ENTRY_POINT_GROUP = "flake8_lint.rules"
+ENTRY_POINT_GROUP = "flakeforge.rules"
 RegisterRulesCallable = Callable[["RuleRegistry"], None]
 RULE_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]*\d{3}$")
 

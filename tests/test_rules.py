@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from flake8_lint import check_file, check_source
-from flake8_lint.config import LintConfig
-from flake8_lint.registry import resolve_registry
+from flakeforge import check_file, check_source
+from flakeforge.config import LintConfig
+from flakeforge.registry import resolve_registry
 
 SAMPLES = Path(__file__).parent / "samples"
 

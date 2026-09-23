@@ -3,12 +3,12 @@ import os
 import textwrap
 from pathlib import Path
 
-from flake8_lint.cli import main
+from flakeforge.cli import main
 
 
 def test_cli_version(capsys) -> None:
     assert main(["--version"]) == 0
-    assert capsys.readouterr().out.strip() == "flake8-lint 1.0.0"
+    assert capsys.readouterr().out.strip() == "flakeforge 1.0.0"
 
 
 def test_cli_check_json_reports_violation(tmp_path, capsys) -> None:
@@ -68,7 +68,7 @@ def test_cli_uses_explicit_config_and_rule_module(tmp_path, monkeypatch, capsys)
     (package / "lint_rules.py").write_text(
         textwrap.dedent(
             """
-            from flake8_lint import RuleRegistry, RuleViolation
+            from flakeforge import RuleRegistry, RuleViolation
 
             class LocalRule:
                 code = "ORG001"
@@ -84,7 +84,7 @@ def test_cli_uses_explicit_config_and_rule_module(tmp_path, monkeypatch, capsys)
         + "\n",
         encoding="utf-8",
     )
-    (config_dir / "flake8_lint.toml").write_text(
+    (config_dir / "flakeforge.toml").write_text(
         'include = ["../src"]\nselect = ["ORG001"]\n',
         encoding="utf-8",
     )
@@ -102,7 +102,7 @@ def test_cli_uses_explicit_config_and_rule_module(tmp_path, monkeypatch, capsys)
                 [
                     "check",
                     "--config",
-                    "config/flake8_lint.toml",
+                    "config/flakeforge.toml",
                     "--rule-module",
                     "demo_project.lint_rules",
                     ".",
@@ -120,13 +120,13 @@ def test_cli_warns_for_legacy_config_and_invalid_canonical_config(tmp_path, caps
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     (legacy / "pyproject.toml").write_text(
-        '[tool.flake8_lint_tests]\nselect = ["X001", "X999"]\n',
+        '[tool.flake8_lint]\nselect = ["X001", "X999"]\n',
         encoding="utf-8",
     )
     canonical = tmp_path / "canonical"
     canonical.mkdir()
     (canonical / "pyproject.toml").write_text(
-        '[tool.flake8_lint]\nselect = ["X001", "X999"]\n',
+        '[tool.flakeforge]\nselect = ["X001", "X999"]\n',
         encoding="utf-8",
     )
     sample = 'def documented() -> int:\n    """Return a number."""\n    return 1\n'
@@ -157,7 +157,7 @@ def test_cli_no_rule_plugins_disables_installed_provider(monkeypatch, tmp_path, 
 
         def load(self):
             def register_rules(registry):
-                from flake8_lint import RuleViolation
+                from flakeforge import RuleViolation
 
                 class PluginRule:
                     code = "ZZZ001"
@@ -172,11 +172,11 @@ def test_cli_no_rule_plugins_disables_installed_provider(monkeypatch, tmp_path, 
 
     class FakeEntryPoints(list):
         def select(self, *, group: str):
-            assert group == "flake8_lint.rules"
+            assert group == "flakeforge.rules"
             return self
 
     monkeypatch.setattr(
-        "flake8_lint.registry.metadata.entry_points",
+        "flakeforge.registry.metadata.entry_points",
         lambda: FakeEntryPoints([FakeEntryPoint()]),
     )
     sample = tmp_path / "sample.py"
@@ -194,7 +194,7 @@ def test_cli_no_rule_plugins_disables_installed_provider(monkeypatch, tmp_path, 
 
 
 def test_cli_select_and_ignore_override_loaded_config(tmp_path, capsys) -> None:
-    (tmp_path / "flake8_lint.toml").write_text(
+    (tmp_path / "flakeforge.toml").write_text(
         'select = ["X999"]\nignore = ["X001"]\n',
         encoding="utf-8",
     )

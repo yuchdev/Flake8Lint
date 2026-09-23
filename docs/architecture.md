@@ -1,6 +1,6 @@
 # Architecture
 
-`flake8-lint` keeps the production rule engine independent from CLI argument parsing, project discovery policy, Flake8 internals, and pytest integration details.
+`flakeforge` keeps the production rule engine independent from CLI argument parsing, project discovery policy, Flake8 internals, and pytest integration details.
 
 ```text
                   +---------------------------+
@@ -17,8 +17,8 @@
 
 ## Core rules / registry
 
-- `flake8_lint.rules` defines the built-in X001–X014 rules.
-- `flake8_lint.registry` owns registration, duplicate detection, rule-code validation, and provider loading.
+- `flakeforge.rules` defines the built-in X001–X014 rules.
+- `flakeforge.registry` owns registration, duplicate detection, rule-code validation, and provider loading.
 - Built-in rules are registered through the same registry mechanism used by custom rules.
 - `X003` detects circular imports by resolving each module's runtime imports against the import root.
 
@@ -26,10 +26,10 @@ That shared registration path matters because extension behavior should exercise
 
 ## Config
 
-`flake8_lint.config` owns:
+`flakeforge.config` owns:
 
 - typed config parsing
-- discovery precedence for `--config`, `flake8_lint.toml`, canonical `pyproject.toml`, legacy `pyproject.toml`, and defaults
+- discovery precedence for `--config`, `flakeforge.toml`, canonical `pyproject.toml`, legacy `pyproject.toml`, and defaults
 - legacy migration metadata and warnings
 - rule-selector validation against the resolved registry
 
@@ -37,17 +37,17 @@ Config parsing does not print warnings directly. Integrations choose whether to 
 
 ## Custom provider loading
 
-`flake8_lint.registry.resolve_registry()` builds one resolved registry from:
+`flakeforge.registry.resolve_registry()` builds one resolved registry from:
 
 1. built-in rules
 2. configured project-local `rule_modules`
-3. installed `flake8_lint.rules` entry points, unless disabled
+3. installed `flakeforge.rules` entry points, unless disabled
 
 Provider loading is deterministic. Duplicate codes and invalid codes fail fast. Import and provider registration failures are surfaced as tool/configuration errors instead of being silently ignored.
 
 ## Discovery
 
-`flake8_lint.discovery` owns:
+`flakeforge.discovery` owns:
 
 - recursive Python file traversal
 - include/exclude path filtering
@@ -58,7 +58,7 @@ The discovery layer is intentionally filesystem-focused. It does not parse rule 
 
 ## API runner
 
-`flake8_lint.api` owns the reusable orchestration surface:
+`flakeforge.api` owns the reusable orchestration surface:
 
 - `check_tree()`
 - `check_file()`
@@ -70,7 +70,7 @@ The API is the shared execution boundary. It validates config selectors against 
 
 ## CLI
 
-`flake8_lint.cli` is a thin integration over the API:
+`flakeforge.cli` is a thin integration over the API:
 
 - parses command-line options
 - loads config with precedence rules
@@ -82,7 +82,7 @@ The CLI is responsible for warning presentation, not low-level modules.
 
 ## Flake8 adapter
 
-`flake8_lint.plugin.ProjectRulesPlugin` is a thin AST adapter:
+`flakeforge.plugin.ProjectRulesPlugin` is a thin AST adapter:
 
 - reuses the shared engine for built-in diagnostics
 - maps Flake8 select/ignore and disable-noqa options into engine config
@@ -92,7 +92,7 @@ That boundary avoids over-claiming support for provider-loading behavior that Fl
 
 ## pytest helper
 
-`flake8_lint.testing.assert_lint_clean()` is explicit opt-in:
+`flakeforge.testing.assert_lint_clean()` is explicit opt-in:
 
 - it calls the shared API
 - it formats failures for assertions

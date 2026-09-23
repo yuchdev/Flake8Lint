@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from flake8_lint import (
+from flakeforge import (
     RuleContext,
     RuleRegistry,
     RuleViolation,
@@ -14,8 +14,8 @@ from flake8_lint import (
     check_tree,
     lint_paths,
 )
-from flake8_lint.api import LintResult
-from flake8_lint.config import ConfigValidationError, LintConfig
+from flakeforge.api import LintResult
+from flakeforge.config import ConfigValidationError, LintConfig
 
 
 class DemoRule:
@@ -170,17 +170,17 @@ def test_lint_paths_explicit_paths_override_include_filters(tmp_path) -> None:
 def test_package_version_falls_back_when_distribution_metadata_is_missing(monkeypatch) -> None:
     from importlib import metadata
 
-    import flake8_lint
+    import flakeforge
 
     def missing_version(_name: str) -> str:
         raise metadata.PackageNotFoundError
 
     monkeypatch.setattr("importlib.metadata.version", missing_version)
-    reloaded = importlib.reload(flake8_lint)
+    reloaded = importlib.reload(flakeforge)
     assert reloaded.__version__ == "1.0.0"
 
 
 def test_python_m_entry_point_raises_system_exit(monkeypatch) -> None:
-    monkeypatch.setattr("flake8_lint.cli.main", lambda: 7)
+    monkeypatch.setattr("flakeforge.cli.main", lambda: 7)
     with pytest.raises(SystemExit, match="7"):
-        runpy.run_module("flake8_lint.__main__", run_name="__main__")
+        runpy.run_module("flakeforge.__main__", run_name="__main__")

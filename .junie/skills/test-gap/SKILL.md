@@ -13,8 +13,8 @@ whole package if empty).
 ## Steps
 
 1. Establish current coverage:
-   `uv run pytest tests/unit/ -q --cov=flake8_lint --cov-report=term-missing`
-   (scope with `--cov=flake8_lint.<subpkg>` when a path is given).
+   `uv run pytest tests/unit/ -q --cov=flakeforge --cov-report=term-missing`
+   (scope with `--cov=flakeforge.<subpkg>` when a path is given).
 2. Spawn the **`testing-expert`** agent with the coverage output and the target path. Ask it
    to map uncovered lines to behaviours and **risk-rank** them using the full
    [references/risk-ranking-rubric.md](references/risk-ranking-rubric.md)

@@ -1,4 +1,4 @@
-"""Thin Flake8 adapter for built-in flake8-lint rules.
+"""Thin Flake8 adapter for built-in flakeforge rules.
 
 Task 0001 keeps installed external rule-provider discovery authoritative in the
 standalone engine and CLI. The Flake8 adapter intentionally caches only the
@@ -16,7 +16,7 @@ from .registry import resolve_registry
 
 
 class ProjectRulesPlugin:
-    """Flake8 plugin entry point exposing the built-in flake8-lint rules.
+    """Flake8 plugin entry point exposing the built-in flakeforge rules.
 
     :cvar name: Plugin name reported to Flake8.
     :cvar version: Plugin version, mirrored from the package version.
@@ -24,20 +24,20 @@ class ProjectRulesPlugin:
     :cvar _registry: Cached registry of built-in rules (entry points excluded).
     """
 
-    name = "flake8-lint"
+    name = "flakeforge"
     version = __version__
     _config = LintConfig()
     _registry = resolve_registry(include_entry_points=False)
 
     @classmethod
     def add_options(cls, option_manager):
-        """Register flake8-lint specific options on the Flake8 option manager."""
+        """Register flakeforge specific options on the Flake8 option manager."""
         option_manager.add_option(
-            "--flake8-lint-no-noqa",
+            "--flakeforge-no-noqa",
             action="store_true",
             parse_from_config=True,
             default=False,
-            help="Disable noqa suppression inside the flake8-lint adapter.",
+            help="Disable noqa suppression inside the flakeforge adapter.",
         )
 
     @classmethod
@@ -53,7 +53,7 @@ class ProjectRulesPlugin:
         )
         disable_noqa = bool(
             getattr(options, "disable_noqa", False)
-            or getattr(options, "flake8_lint_no_noqa", False)
+            or getattr(options, "flakeforge_no_noqa", False)
         )
         cls._config = LintConfig(
             select=select,

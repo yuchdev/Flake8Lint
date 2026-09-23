@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from flake8_lint.config import load_config
-from flake8_lint.testing import assert_lint_clean
+from flakeforge.config import load_config
+from flakeforge.testing import assert_lint_clean
 
 
 def test_lint() -> None:

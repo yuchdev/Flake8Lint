@@ -12,5 +12,5 @@
 
 ## Files
 
-- `src/flake8_lint/api/health.py` - new route handler.
+- `src/flakeforge/api/health.py` - new route handler.
 - Wire the route into the app's existing router setup.

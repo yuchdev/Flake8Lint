@@ -1,6 +1,6 @@
 # Milestone 0001 - Working Implementation
 
-**Package:** `flake8_lint` | **Module root:** `src/flake8_lint/`
+**Package:** `flakeforge` | **Module root:** `src/flakeforge/`
 
 Illustrative milestone showing the roadmap folder taxonomy `implement-subtasks`
 and `subtask-verifier` expect: one task folder per numbered task

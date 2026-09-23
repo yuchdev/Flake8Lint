@@ -1,2 +1,2 @@
-[tool.flake8_lint]
+[tool.flakeforge]
 select = ["X001"]

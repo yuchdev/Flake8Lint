@@ -1,4 +1,4 @@
-"""Authoritative public API and shared engine for flake8-lint."""
+"""Authoritative public API and shared engine for flakeforge."""
 
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ def check_source(
     if effective_registry is None and rules is not None:
         explicit_registry = RuleRegistry()
         for rule in rules:
-            explicit_registry.register(rule, provider="flake8_lint.check_source")
+            explicit_registry.register(rule, provider="flakeforge.check_source")
         effective_registry = explicit_registry
     return check_tree(
         tree,

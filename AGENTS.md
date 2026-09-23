@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`flake8-lint` is a standalone, reusable AST-based Python lint rule engine. It ships four ways to run the same core:
-a standalone CLI (`flake8-lint check`), a Python API, a thin Flake8 plugin adapter, and an opt-in pytest helper.
+`flakeforge` is a standalone, reusable AST-based Python lint rule engine. It ships four ways to run the same core:
+a standalone CLI (`flakeforge check`), a Python API, a thin Flake8 plugin adapter, and an opt-in pytest helper.
 Built-in rules are `X001`-`X014` (all enabled by default); projects can add their own codes via project-local
-rule modules or installed `flake8_lint.rules` entry points.
+rule modules or installed `flakeforge.rules` entry points.
 
 ## Commands
 
@@ -15,18 +15,18 @@ rule modules or installed `flake8_lint.rules` entry points.
 pip install -e .[dev]                                   # local dev install
 
 pytest                                                    # run tests
-pytest --cov=flake8_lint --cov-report=term-missing        # run tests with coverage (used in CI)
+pytest --cov=flakeforge --cov-report=term-missing        # run tests with coverage (used in CI)
 pytest tests/test_rules.py                                # run a single test file
 pytest tests/test_rules.py::test_name -v                  # run a single test
 
 ruff check .                                              # lint (select = E, F, I; line-length 100)
 python -m build                                           # build sdist/wheel
 
-flake8-lint check .                                       # self-check via the CLI
-python -m flake8_lint check --select X001,X009,X010 src   # subset self-check (as CI does)
+flakeforge check .                                       # self-check via the CLI
+python -m flakeforge check --select X001,X009,X010 src   # subset self-check (as CI does)
 ```
 
-CI (`.github/workflows/ci.yml`) runs, per Python 3.11-3.14: pytest+coverage, ruff, a `flake8-lint` self-check
+CI (`.github/workflows/ci.yml`) runs, per Python 3.11-3.14: pytest+coverage, ruff, a `flakeforge` self-check
 subset, then `python -m build`, followed by a separate wheel-smoke job that installs the built wheel into a
 fresh venv and exercises the CLI end-to-end (config precedence, exit codes, custom rule modules, entry-point
 providers). When changing CLI behavior, config precedence, or exit codes, check that job's script in the
@@ -49,11 +49,11 @@ else (config/discovery, the CLI/API, and the Flake8/pytest adapters) is a thin l
 - **`registry.py`** — owns rule registration, duplicate/invalid-code detection, and provider loading. Built-in
   rules register through the *same* mechanism as custom rules, so there is no separate bolt-on path for
   extensions. `resolve_registry()` builds one resolved registry from: built-ins → project-local `rule_modules`
-  → installed `flake8_lint.rules` entry points (unless disabled). Provider loading is deterministic; duplicate
+  → installed `flakeforge.rules` entry points (unless disabled). Provider loading is deterministic; duplicate
   or malformed codes fail fast rather than being silently dropped.
 - **`rules.py`** — the X001-X014 built-in rule implementations, each an AST-walking `check(context)` callable.
-- **`config.py`** — typed config parsing and discovery precedence: `--config PATH` > `flake8_lint.toml` >
-  `pyproject.toml [tool.flake8_lint]` > legacy `pyproject.toml [tool.flake8_lint_tests]` > defaults. Does not
+- **`config.py`** — typed config parsing and discovery precedence: `--config PATH` > `flakeforge.toml` >
+  `pyproject.toml [tool.flakeforge]` > legacy `pyproject.toml [tool.flake8_lint]` > defaults. Does not
   print warnings itself — that's left to callers (CLI decides how to surface them).
 - **`discovery.py`** — filesystem-only: recursive traversal, include/exclude filtering, default skip of
   cache/build/venv dirs, stable ordering/dedup. Does not know about rules or output formatting.
@@ -66,9 +66,9 @@ else (config/discovery, the CLI/API, and the Flake8/pytest adapters) is a thin l
   are a public contract — don't change their meaning.
 - **`plugin.py`** (`ProjectRulesPlugin`) — the Flake8 AST adapter. Reuses the shared engine for built-in
   diagnostics and maps Flake8 select/ignore/disable-noqa into engine config. Deliberately does *not* claim to
-  auto-discover installed `flake8_lint.rules` providers the way the standalone CLI/API does — third-party
+  auto-discover installed `flakeforge.rules` providers the way the standalone CLI/API does — third-party
   packages needing native Flake8 discovery should expose their own Flake8 entry point.
-- **`testing.py`** (`assert_lint_clean`) — explicit pytest opt-in helper over the API. Installing `flake8-lint`
+- **`testing.py`** (`assert_lint_clean`) — explicit pytest opt-in helper over the API. Installing `flakeforge`
   must never cause ordinary `pytest` to auto-run repository-wide lint.
 
 ## Conventions specific to this repo

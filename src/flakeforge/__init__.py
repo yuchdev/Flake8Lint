@@ -1,4 +1,4 @@
-"""Public package interface for flake8-lint."""
+"""Public package interface for flakeforge."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from .registry import RuleRegistry
 def _detect_version() -> str:
     """Return the installed distribution version, or a default fallback."""
     try:
-        return version("flake8-lint")
+        return version("flakeforge")
     except PackageNotFoundError:
         # Metadata is unavailable when running from an uninstalled source tree.
         fallback_version = "1.0.0"
