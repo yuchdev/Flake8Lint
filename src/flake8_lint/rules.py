@@ -15,10 +15,6 @@ from typing import Optional, Union
 from .api import RuleContext, RuleViolation
 from .registry import RuleRegistration
 
-# Safety valve for the X003 import-graph traversal: a module's import closure is
-# explored no further than this many modules.
-_MAX_GRAPH_MODULES = 500
-
 # Parsed import edges of neighbouring modules, keyed by path and invalidated by
 # modification time so repeated runs in one process never go stale.
 _MODULE_IMPORT_CACHE: dict[Path, tuple[int, tuple[ModuleImport, ...]]] = {}
@@ -345,7 +341,12 @@ def _is_type_checking_test(test: ast.expr) -> bool:
     """Return whether *test* is the conventional ``TYPE_CHECKING`` guard."""
     if isinstance(test, ast.Name):
         return test.id == "TYPE_CHECKING"
-    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    return (
+        isinstance(test, ast.Attribute)
+        and test.attr == "TYPE_CHECKING"
+        and isinstance(test.value, ast.Name)
+        and test.value.id == "typing"
+    )
 
 
 def module_location(filename: str) -> Optional[ModuleLocation]:
@@ -386,6 +387,35 @@ def _resolve_module_path(root: Path, module: str) -> Optional[Path]:
     return None
 
 
+def _loaded_package_prefixes(location: ModuleLocation) -> frozenset[str]:
+    """Return the package prefixes already loaded while *location* executes."""
+    package = location.name if location.is_package else location.package
+    if not package:
+        return frozenset()
+    parts = package.split(".")
+    return frozenset(".".join(parts[:index]) for index in range(1, len(parts) + 1))
+
+
+def _runtime_import_targets(
+    root: Path,
+    module: str,
+    *,
+    loaded_packages: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    """Return the project modules Python executes while importing *module*."""
+    if _resolve_module_path(root, module) is None:
+        return ()
+    targets: list[str] = []
+    parts = module.split(".")
+    for index in range(1, len(parts) + 1):
+        candidate = ".".join(parts[:index])
+        if candidate in loaded_packages and index != len(parts):
+            continue
+        if _resolve_module_path(root, candidate) is not None:
+            targets.append(candidate)
+    return tuple(targets)
+
+
 def _absolute_import_base(node: ast.ImportFrom, location: ModuleLocation) -> Optional[str]:
     """Return the absolute dotted package an ``ImportFrom`` resolves against."""
     if node.level == 0:
@@ -412,8 +442,12 @@ def _import_targets(
     because that is the module Python actually executes; otherwise ``Y`` is a
     plain name and the dependency is on ``X`` itself.
     """
+    loaded_packages = _loaded_package_prefixes(location)
     if isinstance(node, ast.Import):
-        return tuple(alias.name for alias in node.names if _resolve_module_path(location.root, alias.name) is not None)
+        targets: list[str] = []
+        for alias in node.names:
+            targets.extend(_runtime_import_targets(location.root, alias.name, loaded_packages=loaded_packages))
+        return tuple(dict.fromkeys(targets))
     base = _absolute_import_base(node, location)
     if base is None:
         return ()
@@ -421,9 +455,9 @@ def _import_targets(
     for alias in node.names:
         submodule = f"{base}.{alias.name}"
         if _resolve_module_path(location.root, submodule) is not None:
-            targets.append(submodule)
+            targets.extend(_runtime_import_targets(location.root, submodule, loaded_packages=loaded_packages))
         elif _resolve_module_path(location.root, base) is not None:
-            targets.append(base)
+            targets.extend(_runtime_import_targets(location.root, base, loaded_packages=loaded_packages))
     return tuple(dict.fromkeys(targets))
 
 
@@ -480,13 +514,13 @@ def build_import_graph(tree: ast.AST, location: ModuleLocation) -> ModuleImportG
     legitimately differ from what is on disk, and every project module it
     reaches is read from the import root. Traversal stops at modules that do not
     resolve to a file under that root, so the graph never spans outside the
-    project, and at :data:`_MAX_GRAPH_MODULES` nodes as a safety valve.
+    project.
     """
     graph = ModuleImportGraph()
     graph.add(location.name, extract_module_imports(tree, location))
     pending: deque[str] = deque(edge.module for edge in graph.imports_of(location.name))
     seen = {location.name, *pending}
-    while pending and len(seen) <= _MAX_GRAPH_MODULES:
+    while pending:
         module = pending.popleft()
         path = _resolve_module_path(location.root, module)
         if path is None:
@@ -1047,16 +1081,17 @@ def _check_non_raii_resources(context: RuleContext) -> Iterable[RuleViolation]:
                     if alias.name == "socket":
                         socket_aliases.add(alias.asname or alias.name)
 
-    for node in ast.walk(context.tree):
-        call: Optional[ast.Call] = None
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            call = node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Call):
-            call = node.value
-        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            call = node.value
+    managed_context_call_ids = {
+        id(call)
+        for node in ast.walk(context.tree)
+        if isinstance(node, (ast.With, ast.AsyncWith))
+        for item in node.items
+        for call in ast.walk(item.context_expr)
+        if isinstance(call, ast.Call)
+    }
 
-        if call is None:
+    for call in (node for node in ast.walk(context.tree) if isinstance(node, ast.Call)):
+        if id(call) in managed_context_call_ids:
             continue
 
         call_name = _non_raii_resource_call_name(

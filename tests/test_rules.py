@@ -217,3 +217,29 @@ def test_x005_accepts_structured_test_docstring() -> None:
         config=LintConfig(select=("X005",)),
     )
     assert violations == ()
+
+
+def test_x013_reports_resource_calls_in_return_expressions() -> None:
+    violations = check_source(
+        "import subprocess\n\n"
+        "def spawn():\n"
+        '    """Spawn a subprocess."""\n'
+        "    return subprocess.Popen(['echo'])\n",
+        filename="sample.py",
+        config=LintConfig(select=("X013",)),
+    )
+    assert [violation.code for violation in violations] == ["X013"]
+
+
+def test_x013_skips_calls_inside_with_context_expressions() -> None:
+    violations = check_source(
+        "import contextlib\n"
+        "import socket\n\n"
+        "def open_socket() -> None:\n"
+        '    """Open and close a socket."""\n'
+        "    with contextlib.closing(socket.socket()) as sock:\n"
+        "        sock.close()\n",
+        filename="sample.py",
+        config=LintConfig(select=("X013",)),
+    )
+    assert violations == ()

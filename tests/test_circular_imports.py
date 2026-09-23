@@ -128,6 +128,36 @@ def test_dotted_import_with_alias_is_reported(tmp_path) -> None:
     assert _codes(package / "alpha.py") == ["X003"]
 
 
+def test_dotted_import_counts_the_package_initialiser_before_the_submodule(tmp_path) -> None:
+    _make_package(
+        tmp_path,
+        "target",
+        {
+            "__init__": "from consumer.alpha import ALPHA\n",
+            "beta": "BETA = 1\n",
+        },
+    )
+    package = _make_package(tmp_path, "consumer", {"alpha": "import target.beta\n\nALPHA = 1\n"})
+    violations = check_file(package / "alpha.py", config=ONLY_X003)
+    assert [violation.code for violation in violations] == ["X003"]
+    assert "consumer.alpha -> target -> consumer.alpha" in violations[0].message
+
+
+def test_from_import_counts_the_package_initialiser_before_the_submodule(tmp_path) -> None:
+    _make_package(
+        tmp_path,
+        "target",
+        {
+            "__init__": "from consumer.alpha import ALPHA\n",
+            "beta": "BETA = 1\n",
+        },
+    )
+    package = _make_package(tmp_path, "consumer", {"alpha": "from target import beta\n\nALPHA = beta.BETA\n"})
+    violations = check_file(package / "alpha.py", config=ONLY_X003)
+    assert [violation.code for violation in violations] == ["X003"]
+    assert "consumer.alpha -> target -> consumer.alpha" in violations[0].message
+
+
 def test_type_checking_import_does_not_form_a_cycle(tmp_path) -> None:
     package = _make_package(
         tmp_path,
@@ -151,6 +181,19 @@ def test_qualified_type_checking_guard_is_also_honoured(tmp_path) -> None:
         },
     )
     assert _codes(package / "alpha.py") == []
+
+
+def test_non_typing_type_checking_attribute_still_counts_as_runtime(tmp_path) -> None:
+    package = _make_package(
+        tmp_path,
+        "attrguard",
+        {
+            "alpha": "import attrguard.config as config\n\nif config.TYPE_CHECKING:\n    from .beta import BETA\n",
+            "beta": "from .alpha import ALPHA\n",
+            "config": "TYPE_CHECKING = True\n",
+        },
+    )
+    assert _codes(package / "alpha.py") == ["X003"]
 
 
 def test_else_branch_of_a_type_checking_guard_runs_at_import_time(tmp_path) -> None:
@@ -378,3 +421,19 @@ def test_build_import_graph_stops_at_the_import_root(tmp_path) -> None:
     assert graph.modules() == ("bounded.alpha", "bounded.beta")
     assert [edge.module for edge in graph.imports_of("bounded.alpha")] == ["bounded.beta"]
     assert graph.imports_of("bounded.beta") == ()
+
+
+def test_long_cycles_are_not_hidden_by_graph_traversal_limits(tmp_path) -> None:
+    module_count = 505
+    modules = {
+        f"m{index:03d}": (
+            f"from longcycle.m{(index + 1) % module_count:03d} import VALUE\n"
+            "VALUE = 1\n"
+        )
+        for index in range(module_count)
+    }
+    package = _make_package(tmp_path, "longcycle", modules)
+
+    violations = check_file(package / "m000.py", config=ONLY_X003)
+
+    assert [violation.code for violation in violations] == ["X003"]
