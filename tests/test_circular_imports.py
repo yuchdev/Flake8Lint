@@ -10,6 +10,7 @@ from flake8_lint.config import LintConfig
 from flake8_lint.rules import (
     ModuleImport,
     ModuleImportGraph,
+    _cached_module_imports,
     build_import_graph,
     extract_module_imports,
     module_location,
@@ -437,3 +438,24 @@ def test_long_cycles_are_not_hidden_by_graph_traversal_limits(tmp_path) -> None:
     violations = check_file(package / "m000.py", config=ONLY_X003)
 
     assert [violation.code for violation in violations] == ["X003"]
+
+
+def test_cached_module_imports_respects_module_identity(tmp_path) -> None:
+    alpha = tmp_path / "shared_alpha.py"
+    alpha.write_text("from .beta import BETA\n", encoding="utf-8")
+
+    first_root = tmp_path / "first"
+    first_beta = first_root / "pkg" / "beta.py"
+    first_beta.parent.mkdir(parents=True)
+    first_beta.write_text("BETA = 1\n", encoding="utf-8")
+
+    second_root = tmp_path / "second"
+    second_beta = second_root / "other" / "beta.py"
+    second_beta.parent.mkdir(parents=True)
+    second_beta.write_text("BETA = 2\n", encoding="utf-8")
+
+    first = _cached_module_imports(alpha, first_root, "pkg.alpha")
+    second = _cached_module_imports(alpha, second_root, "other.alpha")
+
+    assert [module_import.module for module_import in first] == ["pkg.beta"]
+    assert [module_import.module for module_import in second] == ["other.beta"]

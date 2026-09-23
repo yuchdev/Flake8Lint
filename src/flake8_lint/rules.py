@@ -15,9 +15,10 @@ from typing import Optional, Union
 from .api import RuleContext, RuleViolation
 from .registry import RuleRegistration
 
-# Parsed import edges of neighbouring modules, keyed by path and invalidated by
-# modification time so repeated runs in one process never go stale.
-_MODULE_IMPORT_CACHE: dict[Path, tuple[int, tuple[ModuleImport, ...]]] = {}
+# Parsed import edges of neighbouring modules, keyed by their effective import
+# identity and invalidated by modification time so repeated runs in one process
+# never go stale.
+_MODULE_IMPORT_CACHE: dict[tuple[Path, Path, str], tuple[int, tuple[ModuleImport, ...]]] = {}
 
 
 @dataclass(frozen=True)
@@ -491,7 +492,8 @@ def _cached_module_imports(path: Path, root: Path, module: str) -> tuple[ModuleI
         # An unreadable neighbour simply contributes no edges to the graph.
         unreadable: tuple[ModuleImport, ...] = ()
         return unreadable
-    cached = _MODULE_IMPORT_CACHE.get(path)
+    cache_key = (path, root, module)
+    cached = _MODULE_IMPORT_CACHE.get(cache_key)
     if cached is not None and cached[0] == modified_ns:
         return cached[1]
     try:
@@ -499,11 +501,11 @@ def _cached_module_imports(path: Path, root: Path, module: str) -> tuple[ModuleI
     except (OSError, SyntaxError, ValueError):
         # A neighbour that cannot be read or parsed is treated as a graph leaf.
         unparsable: tuple[ModuleImport, ...] = ()
-        _MODULE_IMPORT_CACHE[path] = (modified_ns, unparsable)
+        _MODULE_IMPORT_CACHE[cache_key] = (modified_ns, unparsable)
         return unparsable
     location = ModuleLocation(root=root, name=module, is_package=path.stem == "__init__")
     imports = extract_module_imports(tree, location)
-    _MODULE_IMPORT_CACHE[path] = (modified_ns, imports)
+    _MODULE_IMPORT_CACHE[cache_key] = (modified_ns, imports)
     return imports
 
 
