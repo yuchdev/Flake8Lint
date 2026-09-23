@@ -231,6 +231,15 @@ def test_x013_reports_resource_calls_in_return_expressions() -> None:
     assert [violation.code for violation in violations] == ["X013"]
 
 
+def test_x013_still_applies_to_non_test_modules_that_import_pytest() -> None:
+    violations = check_source(
+        "import pytest\nimport subprocess\n\nproc = subprocess.Popen(['echo'])\n",
+        filename="helper.py",
+        config=LintConfig(select=("X013",)),
+    )
+    assert [violation.code for violation in violations] == ["X013"]
+
+
 def test_x013_skips_calls_inside_with_context_expressions() -> None:
     violations = check_source(
         "import contextlib\n"

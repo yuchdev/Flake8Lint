@@ -538,6 +538,7 @@ def _check_circular_imports(context: RuleContext) -> Iterable[RuleViolation]:
     """X003: flag module-level imports that take part in an import cycle."""
     location = module_location(context.filename)
     if location is None:
+        yield from ()
         return
     graph = build_import_graph(context.tree, location)
     for edge in graph.imports_of(location.name):
@@ -1019,16 +1020,11 @@ def _check_union_type_annotations(context: RuleContext) -> Iterable[RuleViolatio
             )
 
 
-def _is_named_or_imported_test_module(context: RuleContext) -> bool:
-    """Return whether *context* looks like a test module by name or imports.
-
-    Unlike :func:`_is_test_module`, this does not treat membership in a
-    ``tests/`` directory alone as sufficient, since X013 must still apply to
-    non-test helper modules that merely live under such a directory.
-    """
+def _is_named_test_module(context: RuleContext) -> bool:
+    """Return whether *context* looks like a test module by filename."""
     path = Path(context.filename)
     name = path.name
-    return name.startswith("test_") or name.endswith("_test.py") or _has_test_imports(context.tree)
+    return name.startswith("test_") or name.endswith("_test.py")
 
 
 def _non_raii_resource_call_name(
@@ -1056,7 +1052,7 @@ def _non_raii_resource_call_name(
 
 def _check_non_raii_resources(context: RuleContext) -> Iterable[RuleViolation]:
     """X013: require ``subprocess.Popen`` and ``socket.socket`` to be context-managed."""
-    if _is_named_or_imported_test_module(context):
+    if _is_named_test_module(context):
         return
 
     subprocess_aliases = {"subprocess"}
@@ -1125,6 +1121,7 @@ _TODO_ANNOTATION_RE = re.compile(
 def _check_todo_annotations(context: RuleContext) -> Iterable[RuleViolation]:
     """X014: enforce tracked TODO/FIXME metadata in source comments."""
     if context.source is None:
+        yield from ()
         return
 
     for token in tokenize.generate_tokens(StringIO(context.source).readline):
