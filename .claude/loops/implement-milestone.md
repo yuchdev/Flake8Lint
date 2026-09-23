@@ -337,7 +337,7 @@ contracts that outlive any milestone:
 - Exit-code and CLI-behavior rulings must additionally be reflected in the `wheel-smoke` job
   script in `.github/workflows/ci.yml`, which asserts the expected codes executably.
 - Some divergences are **not ratifiable and must be escalated, not decided in-loop**: renumbering
-  or reusing an existing `X`-code, un-reserving `X003`, downgrading duplicate/invalid rule codes
+  or reusing an existing `X`-code, downgrading duplicate/invalid rule codes
   from errors to warnings, moving `# noqa` handling out of `api.py` into a rule, importing from
   `tests/` in production code, or making ordinary `pytest` auto-run repository lint. If a task's
   as-built shape requires one of these, stop the loop and surface it rather than presenting it as

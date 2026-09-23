@@ -13,6 +13,7 @@ SAMPLES = Path(__file__).parent / "samples"
 VIOLATION_SAMPLES = [
     ("X001", "x001_bare_except_violation.py"),
     ("X002", "x002_broad_exception_violation.py"),
+    ("X003", "x003_circular_import_pkg/alpha.py"),
     ("X004", "x004_muted_exception_violation.py"),
     ("X005", "x005_missing_docstring_violation.py"),
     ("X005", "x005_structured_test_docstring_violation.py"),
@@ -23,13 +24,15 @@ VIOLATION_SAMPLES = [
     ("X010", "x010_import_error_suppression_violation.py"),
     ("X011", "x011_optional_violation.py"),
     ("X012", "x012_union_type_violation.py"),
+    ("X013", "x013_non_raii_resource_violation.py"),
+    ("X014", "x014_todo_annotation_violation.py"),
 ]
 
 # Clean/near-miss samples that are clean under the full default rule set.
 FULLY_CLEAN_SAMPLES = [
     "x001_bare_except_clean.py",
     "x002_broad_exception_clean.py",
-    "x003_reserved_code_never_fires_clean.py",
+    "x003_circular_import_clean.py",
     "x004_muted_exception_clean.py",
     "x005_single_quoted_docstring_clean.py",
     "x005_complete_structured_test_docstring_clean.py",
@@ -39,6 +42,8 @@ FULLY_CLEAN_SAMPLES = [
     "x010_import_error_suppression_clean.py",
     "x011_optional_clean.py",
     "x012_union_type_clean.py",
+    "x013_non_raii_resource_clean.py",
+    "x014_todo_annotation_clean.py",
 ]
 
 
@@ -86,6 +91,8 @@ def test_x008_stub_sample_is_clean_for_its_target_rule() -> None:
         ),
         ("X011", "value: int | None = None\n"),
         ("X012", "value: int | str = 1\n"),
+        ("X013", "import subprocess\n\nproc = subprocess.Popen(['echo'])\n"),
+        ("X014", "# TODO: fix this later\n"),
     ],
 )
 def test_each_builtin_rule_fires_on_a_direct_sample(code: str, source: str) -> None:
@@ -93,25 +100,16 @@ def test_each_builtin_rule_fires_on_a_direct_sample(code: str, source: str) -> N
     assert [violation.code for violation in violations] == [code]
 
 
-def test_registry_includes_reserved_x003() -> None:
+def test_registry_registers_x003_as_an_active_rule() -> None:
     registry = resolve_registry(include_entry_points=False)
     registration = registry.get("X003")
-    assert registration.reserved is True
-    assert registration.enabled is False
+    assert registration.reserved is False
+    assert registration.enabled is True
 
 
 def test_clean_sample_is_clean_for_all_builtin_rules() -> None:
     sample = SAMPLES / "valid_clean_module.py"
     assert check_file(sample) == ()
-
-
-def test_x003_remains_inactive_even_when_selected() -> None:
-    assert check_source("x = 1\n", filename="sample.py", config=LintConfig(select=("X003",))) == ()
-
-
-def test_x003_reserved_sample_stays_inactive_when_selected() -> None:
-    sample = SAMPLES / "x003_reserved_code_never_fires_clean.py"
-    assert check_file(sample, config=LintConfig(select=("X003",))) == ()
 
 
 def test_x007_ignores_returns_inside_nested_classes(tmp_path) -> None:

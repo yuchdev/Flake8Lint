@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import ast
 import re
+import tokenize
+from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Optional, Union
 
 from .api import RuleContext, RuleViolation
 from .registry import RuleRegistration
+
+# Safety valve for the X003 import-graph traversal: a module's import closure is
+# explored no further than this many modules.
+_MAX_GRAPH_MODULES = 500
+
+# Parsed import edges of neighbouring modules, keyed by path and invalidated by
+# modification time so repeated runs in one process never go stale.
+_MODULE_IMPORT_CACHE: dict[Path, tuple[int, tuple[ModuleImport, ...]]] = {}
 
 
 @dataclass(frozen=True)
@@ -48,11 +59,13 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
         ),
         RuleRegistration(
             code="X003",
-            description="Reserved rule code.",
-            rule=CallbackRule("X003", "Reserved rule code.", _check_reserved),
+            description="Do not create circular imports.",
+            rule=CallbackRule(
+                "X003",
+                "Do not create circular imports.",
+                _check_circular_imports,
+            ),
             provider="flake8_lint.builtin",
-            enabled=False,
-            reserved=True,
         ),
         RuleRegistration(
             code="X004",
@@ -124,6 +137,26 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
             rule=CallbackRule("X012", "Do not use Type1 | Type2.", _check_union_type_annotations),
             provider="flake8_lint.builtin",
         ),
+        RuleRegistration(
+            code="X013",
+            description="Require RAII context management for subprocess.Popen and socket.socket.",
+            rule=CallbackRule(
+                "X013",
+                "Require RAII context management for subprocess.Popen and socket.socket.",
+                _check_non_raii_resources,
+            ),
+            provider="flake8_lint.builtin",
+        ),
+        RuleRegistration(
+            code="X014",
+            description="Enforce tracked TODO/FIXME metadata in comments.",
+            rule=CallbackRule(
+                "X014",
+                "Enforce tracked TODO/FIXME metadata in comments.",
+                _check_todo_annotations,
+            ),
+            provider="flake8_lint.builtin",
+        ),
     )
 
 
@@ -171,10 +204,323 @@ def _check_broad_exception(context: RuleContext) -> Iterable[RuleViolation]:
             )
 
 
-def _check_reserved(context: RuleContext) -> Iterable[RuleViolation]:
-    """X003: reserved placeholder rule that never emits violations."""
-    del context
-    return ()
+@dataclass(frozen=True)
+class ModuleImport:
+    """One runtime import edge extracted from a module's AST.
+
+    :ivar module: Absolute dotted name of the imported project module.
+    :ivar lineno: 1-based line of the import statement creating the edge.
+    :ivar col_offset: 0-based column of the import statement.
+    """
+
+    module: str
+    lineno: int
+    col_offset: int
+
+
+@dataclass(frozen=True)
+class ModuleLocation:
+    """Where a module lives on disk and how it is addressed as an import.
+
+    :ivar root: Directory the module is imported from, i.e. the directory that
+        would have to be on ``sys.path`` for :attr:`name` to be importable.
+    :ivar name: Absolute dotted module name, such as ``pkg.sub.mod``.
+    :ivar is_package: Whether the module is a package's ``__init__`` module.
+    """
+
+    root: Path
+    name: str
+    is_package: bool
+
+    @property
+    def package(self) -> str:
+        """Return the dotted package that relative imports resolve against."""
+        if self.is_package:
+            return self.name
+        parent, _, _ = self.name.rpartition(".")
+        return parent
+
+
+class ModuleImportGraph:
+    """Directed graph of the runtime import dependencies between modules.
+
+    Nodes are absolute dotted module names and edges are the module-level
+    imports found in each module's AST. The graph is a plain container: callers
+    populate it with :meth:`add` and interrogate it with :meth:`imports_of` and
+    :meth:`find_path`.
+    """
+
+    def __init__(self):
+        """Initialise an empty graph."""
+        self._edges: dict[str, tuple[ModuleImport, ...]] = {}
+
+    def add(self, module: str, imports: Sequence[ModuleImport]):
+        """Record *imports* as the outgoing edges of *module*."""
+        self._edges[module] = tuple(imports)
+
+    def modules(self) -> tuple[str, ...]:
+        """Return every module with recorded outgoing edges, ordered by name."""
+        return tuple(sorted(self._edges))
+
+    def imports_of(self, module: str) -> tuple[ModuleImport, ...]:
+        """Return the recorded outgoing edges of *module*."""
+        return self._edges.get(module, ())
+
+    def find_path(self, source: str, target: str) -> tuple[str, ...]:
+        """Return the shortest import path leading from *source* to *target*.
+
+        The path includes both endpoints, so a module importing itself yields a
+        single-element path. An empty tuple means *target* is unreachable.
+        Neighbours are visited in name order so the result is deterministic.
+        """
+        if source == target:
+            return (source,)
+        queue: deque[tuple[str, ...]] = deque([(source,)])
+        visited = {source}
+        while queue:
+            path = queue.popleft()
+            for neighbour in sorted({edge.module for edge in self.imports_of(path[-1])}):
+                if neighbour == target:
+                    return (*path, neighbour)
+                if neighbour in visited:
+                    continue
+                visited.add(neighbour)
+                queue.append((*path, neighbour))
+        return ()
+
+
+class _RuntimeImportCollector(ast.NodeVisitor):
+    """Collect the import statements that run when a module is first imported."""
+
+    def __init__(self):
+        """Initialise with no collected nodes and zero deferred depth."""
+        self.nodes: list[Union[ast.Import, ast.ImportFrom]] = []
+        self._deferred_depth = 0
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        """Treat a sync function body as deferred."""
+        self._visit_deferred(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        """Treat an async function body as deferred."""
+        self._visit_deferred(node)
+
+    def visit_Lambda(self, node: ast.Lambda):
+        """Treat a lambda body as deferred."""
+        self._visit_deferred(node)
+
+    def visit_If(self, node: ast.If):
+        """Defer an ``if TYPE_CHECKING:`` body while keeping its ``else`` runtime."""
+        if not _is_type_checking_test(node.test):
+            self.generic_visit(node)
+            return
+        self._deferred_depth += 1
+        for statement in node.body:
+            self.visit(statement)
+        self._deferred_depth -= 1
+        for statement in node.orelse:
+            self.visit(statement)
+
+    def visit_Import(self, node: ast.Import):
+        """Record a runtime ``import x`` statement."""
+        self._record(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        """Record a runtime ``from x import y`` statement."""
+        self._record(node)
+
+    def _visit_deferred(self, node: ast.AST):
+        """Visit *node*'s children with any imports marked as deferred."""
+        self._deferred_depth += 1
+        self.generic_visit(node)
+        self._deferred_depth -= 1
+
+    def _record(self, node: Union[ast.Import, ast.ImportFrom]):
+        """Keep *node* only when it executes at module import time."""
+        if self._deferred_depth == 0:
+            self.nodes.append(node)
+
+
+def _is_type_checking_test(test: ast.expr) -> bool:
+    """Return whether *test* is the conventional ``TYPE_CHECKING`` guard."""
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def module_location(filename: str) -> Optional[ModuleLocation]:
+    """Return the import location of *filename*, or ``None`` when unresolvable.
+
+    The import root is found by walking up from the file for as long as the
+    containing directories are packages, mirroring how the module would be
+    imported from that root. Files that do not exist on disk - a synthetic name
+    handed to :func:`~flake8_lint.check_source`, for instance - have no location.
+    """
+    path = Path(filename)
+    if path.suffix != ".py" or not path.is_file():
+        return None
+    resolved = path.resolve()
+    is_package = resolved.stem == "__init__"
+    parts: list[str] = [] if is_package else [resolved.stem]
+    directory = resolved.parent
+    while (directory / "__init__.py").is_file():
+        parts.append(directory.name)
+        directory = directory.parent
+    if not parts:
+        return None
+    return ModuleLocation(root=directory, name=".".join(reversed(parts)), is_package=is_package)
+
+
+def _resolve_module_path(root: Path, module: str) -> Optional[Path]:
+    """Return the file implementing *module* under *root*, or ``None``."""
+    if not module:
+        return None
+    parts = module.split(".")
+    candidates = (
+        root.joinpath(*parts[:-1], f"{parts[-1]}.py"),
+        root.joinpath(*parts, "__init__.py"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _absolute_import_base(node: ast.ImportFrom, location: ModuleLocation) -> Optional[str]:
+    """Return the absolute dotted package an ``ImportFrom`` resolves against."""
+    if node.level == 0:
+        return node.module or None
+    package_parts = [part for part in location.package.split(".") if part]
+    ascent = node.level - 1
+    if ascent > len(package_parts):
+        return None
+    base_parts = package_parts[: len(package_parts) - ascent]
+    if node.module:
+        base_parts = [*base_parts, *node.module.split(".")]
+    return ".".join(base_parts) or None
+
+
+def _import_targets(
+    node: Union[ast.Import, ast.ImportFrom],
+    location: ModuleLocation,
+) -> tuple[str, ...]:
+    """Return the project modules a single import statement pulls in.
+
+    Targets that do not resolve to a file under the import root are dropped, so
+    standard-library and third-party imports never enter the graph. For
+    ``from X import Y`` the submodule ``X.Y`` wins when it exists on disk,
+    because that is the module Python actually executes; otherwise ``Y`` is a
+    plain name and the dependency is on ``X`` itself.
+    """
+    if isinstance(node, ast.Import):
+        return tuple(alias.name for alias in node.names if _resolve_module_path(location.root, alias.name) is not None)
+    base = _absolute_import_base(node, location)
+    if base is None:
+        return ()
+    targets: list[str] = []
+    for alias in node.names:
+        submodule = f"{base}.{alias.name}"
+        if _resolve_module_path(location.root, submodule) is not None:
+            targets.append(submodule)
+        elif _resolve_module_path(location.root, base) is not None:
+            targets.append(base)
+    return tuple(dict.fromkeys(targets))
+
+
+def extract_module_imports(tree: ast.AST, location: ModuleLocation) -> tuple[ModuleImport, ...]:
+    """Return the runtime, module-level import edges of a located module.
+
+    Imports Python does not execute while first loading the module - those
+    nested in a function body or guarded by ``if TYPE_CHECKING:`` - are skipped,
+    because deferring an import is the standard way to *break* an import cycle
+    rather than a symptom of one.
+    """
+    collector = _RuntimeImportCollector()
+    collector.visit(tree)
+    imports: list[ModuleImport] = []
+    for node in collector.nodes:
+        for target in _import_targets(node, location):
+            imports.append(ModuleImport(module=target, lineno=node.lineno, col_offset=node.col_offset))
+    return tuple(imports)
+
+
+def _cached_module_imports(path: Path, root: Path, module: str) -> tuple[ModuleImport, ...]:
+    """Return the import edges of the module at *path*, reusing a parse cache.
+
+    The cache is keyed by path and invalidated by modification time, so a long
+    lived process (an editor running the Flake8 adapter, for example) still sees
+    edits, while a single run parses each neighbouring module only once.
+    """
+    try:
+        modified_ns = path.stat().st_mtime_ns
+    except OSError:
+        # An unreadable neighbour simply contributes no edges to the graph.
+        unreadable: tuple[ModuleImport, ...] = ()
+        return unreadable
+    cached = _MODULE_IMPORT_CACHE.get(path)
+    if cached is not None and cached[0] == modified_ns:
+        return cached[1]
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, ValueError):
+        # A neighbour that cannot be read or parsed is treated as a graph leaf.
+        unparsable: tuple[ModuleImport, ...] = ()
+        _MODULE_IMPORT_CACHE[path] = (modified_ns, unparsable)
+        return unparsable
+    location = ModuleLocation(root=root, name=module, is_package=path.stem == "__init__")
+    imports = extract_module_imports(tree, location)
+    _MODULE_IMPORT_CACHE[path] = (modified_ns, imports)
+    return imports
+
+
+def build_import_graph(tree: ast.AST, location: ModuleLocation) -> ModuleImportGraph:
+    """Build the import graph reachable from the module described by *location*.
+
+    The module under analysis contributes the edges found in *tree*, which may
+    legitimately differ from what is on disk, and every project module it
+    reaches is read from the import root. Traversal stops at modules that do not
+    resolve to a file under that root, so the graph never spans outside the
+    project, and at :data:`_MAX_GRAPH_MODULES` nodes as a safety valve.
+    """
+    graph = ModuleImportGraph()
+    graph.add(location.name, extract_module_imports(tree, location))
+    pending: deque[str] = deque(edge.module for edge in graph.imports_of(location.name))
+    seen = {location.name, *pending}
+    while pending and len(seen) <= _MAX_GRAPH_MODULES:
+        module = pending.popleft()
+        path = _resolve_module_path(location.root, module)
+        if path is None:
+            continue
+        imports = _cached_module_imports(path, location.root, module)
+        graph.add(module, imports)
+        for edge in imports:
+            if edge.module not in seen:
+                seen.add(edge.module)
+                pending.append(edge.module)
+    return graph
+
+
+def _check_circular_imports(context: RuleContext) -> Iterable[RuleViolation]:
+    """X003: flag module-level imports that take part in an import cycle."""
+    location = module_location(context.filename)
+    if location is None:
+        return
+    graph = build_import_graph(context.tree, location)
+    for edge in graph.imports_of(location.name):
+        return_path = graph.find_path(edge.module, location.name)
+        if not return_path:
+            continue
+        chain = " -> ".join((location.name, *return_path))
+        yield RuleViolation(
+            filename=context.filename,
+            lineno=edge.lineno,
+            col_offset=edge.col_offset,
+            code="X003",
+            message=(
+                f"Circular import detected: {chain}; move the shared definitions into a "
+                "separate module, or defer this import so it does not run at import time."
+            ),
+        )
 
 
 def _is_muting_stmt(stmt: ast.stmt) -> bool:
@@ -637,3 +983,130 @@ def _check_union_type_annotations(context: RuleContext) -> Iterable[RuleViolatio
                 "X012",
                 "Do not use `Type1 | Type2` in type hints; use `Union[Type1, Type2]` from typing instead.",
             )
+
+
+def _is_named_or_imported_test_module(context: RuleContext) -> bool:
+    """Return whether *context* looks like a test module by name or imports.
+
+    Unlike :func:`_is_test_module`, this does not treat membership in a
+    ``tests/`` directory alone as sufficient, since X013 must still apply to
+    non-test helper modules that merely live under such a directory.
+    """
+    path = Path(context.filename)
+    name = path.name
+    return name.startswith("test_") or name.endswith("_test.py") or _has_test_imports(context.tree)
+
+
+def _non_raii_resource_call_name(
+    call: ast.Call,
+    *,
+    subprocess_aliases: set[str],
+    socket_module_aliases: set[str],
+    popen_aliases: set[str],
+    socket_aliases: set[str],
+) -> Optional[str]:
+    """Return the matched non-RAII resource call name, or ``None`` when unrelated."""
+    func = call.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        if func.attr == "Popen" and func.value.id in subprocess_aliases:
+            return f"{func.value.id}.Popen"
+        if func.attr == "socket" and func.value.id in socket_module_aliases:
+            return f"{func.value.id}.socket"
+    if isinstance(func, ast.Name):
+        if func.id in popen_aliases:
+            return func.id
+        if func.id in socket_aliases:
+            return func.id
+    return None
+
+
+def _check_non_raii_resources(context: RuleContext) -> Iterable[RuleViolation]:
+    """X013: require ``subprocess.Popen`` and ``socket.socket`` to be context-managed."""
+    if _is_named_or_imported_test_module(context):
+        return
+
+    subprocess_aliases = {"subprocess"}
+    socket_module_aliases = {"socket"}
+    popen_aliases: set[str] = set()
+    socket_aliases: set[str] = set()
+
+    for node in ast.walk(context.tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess":
+                    subprocess_aliases.add(alias.asname or alias.name)
+                elif alias.name == "socket":
+                    socket_module_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess":
+                for alias in node.names:
+                    if alias.name == "Popen":
+                        popen_aliases.add(alias.asname or alias.name)
+            elif node.module == "socket":
+                for alias in node.names:
+                    if alias.name == "socket":
+                        socket_aliases.add(alias.asname or alias.name)
+
+    for node in ast.walk(context.tree):
+        call: Optional[ast.Call] = None
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            call = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Call):
+            call = node.value
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+
+        if call is None:
+            continue
+
+        call_name = _non_raii_resource_call_name(
+            call,
+            subprocess_aliases=subprocess_aliases,
+            socket_module_aliases=socket_module_aliases,
+            popen_aliases=popen_aliases,
+            socket_aliases=socket_aliases,
+        )
+        if call_name is None:
+            continue
+
+        yield _violation(
+            context,
+            call,
+            "X013",
+            f"`{call_name}(...)` is not used as a context manager; wrap it in a `with` statement "
+            "so the process or socket is always closed, even on exceptions.",
+        )
+
+
+_TODO_ANNOTATION_RE = re.compile(
+    r"^#\s*(?:TODO|FIXME):\s*"
+    r"\[(?P<date>\d{4}-\d{2}-\d{2})\]"
+    r"\[(?P<owner>[A-Za-z0-9][A-Za-z0-9_-]*)\]\s+"
+    r"(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)\s+"
+    r"\[issue:\s*#(?P<issue>\d+),\s*(?P<url>https?://[^\]\s]+)\]\s+-\s+\S.*$"
+)
+
+
+def _check_todo_annotations(context: RuleContext) -> Iterable[RuleViolation]:
+    """X014: enforce tracked TODO/FIXME metadata in source comments."""
+    if context.source is None:
+        return
+
+    for token in tokenize.generate_tokens(StringIO(context.source).readline):
+        if token.type != tokenize.COMMENT:
+            continue
+        comment_upper = token.string.upper()
+        if "TODO" not in comment_upper and "FIXME" not in comment_upper:
+            continue
+        if _TODO_ANNOTATION_RE.fullmatch(token.string.strip()):
+            continue
+        yield RuleViolation(
+            filename=context.filename,
+            lineno=token.start[0],
+            col_offset=token.start[1],
+            code="X014",
+            message=(
+                "Malformed TODO/FIXME annotation: use `# TODO: [YYYY-MM-DD][developer-name] debt-slug "
+                "[issue: #123, https://example.invalid/issues/123] - short action/context`."
+            ),
+        )
