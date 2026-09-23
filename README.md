@@ -216,9 +216,9 @@ That keeps unit and integration tests running even when lint finds violations.
 
 ## Renamed from flake8-lint
 
-This project shipped its first commits as `flake8-lint`; it was renamed to `flakeforge` before
-any release to an index, to stop it reading as "flake8 itself" rather than an extension of it.
-If you depend on a pre-rename commit:
+This project was initially released as `flake8-lint` and was later renamed to `flakeforge` to
+avoid it reading as "flake8 itself" rather than an extension of it.
+If you depend on an older release or a pre-rename commit:
 
 - the import package is `flakeforge` (was `flake8_lint`)
 - the console script is `flakeforge` (was `flake8-lint`)

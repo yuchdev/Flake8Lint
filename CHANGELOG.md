@@ -15,9 +15,9 @@
 
 ## 1.0.0
 
-- Extract existing AST lint rules into reusable `flakeforge` package.
-- Add standalone `flakeforge check` CLI.
-- Support `pyproject.toml` and `flakeforge.toml` configuration.
+- Extract existing AST lint rules into reusable `flake8-lint` package.
+- Add standalone `flake8-lint check` CLI.
+- Support `pyproject.toml` and `flake8_lint.toml` configuration.
 - Preserve X001-X012 codes and reserved X003.
 - Add missing X012 test coverage.
 - Add configurable `# noqa` policy.
