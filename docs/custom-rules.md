@@ -136,6 +136,7 @@ Project-local `rule_modules` are Python modules that `flakeforge` **imports and 
 This means running `flakeforge` on a repository executes the code listed in that repository's `rule_modules` (from its `flakeforge.toml` or `pyproject.toml [tool.flakeforge]`), with your user's privileges, at import time. Treat a cloned repository as untrusted input:
 
 - Run `flakeforge check --no-config <path>` on untrusted checkouts. `--no-config` loads **no** project rule modules and never places the target directory on `sys.path`.
+- The same applies to `flakeforge rules` and `flakeforge config show`. They resolve the registry exactly as `check` does, so they also import the target's `rule_modules`. Pass `--no-config` to them on untrusted checkouts too. `flakeforge init` loads nothing.
 - `--rule-module NAME` stays an explicit opt-in. Under `--no-config`, or when no config file is found for the target, it resolves only from the existing `sys.path` (installed packages / `PYTHONPATH`), not from the target directory.
 - Installed `flakeforge.rules` entry-point providers are unaffected by this boundary; they resolve through installed package metadata, and `--no-rule-plugins` disables them.
 
@@ -165,6 +166,26 @@ Provider loading is deterministic by entry-point name and target. Provider load 
 ```bash
 flakeforge check --no-rule-plugins .
 ```
+
+## Registration origin
+
+Every rule in a resolved registry records where it entered, on
+`RuleRegistration.origin`:
+
+- `builtin` for the built-in `X###` rules (and for any registration made on a
+  hand-built `RuleRegistry` outside `resolve_registry`);
+- `rule_module:<name>` for a rule registered by a project-local module named in
+  `rule_modules`;
+- `entry_point:<dist>` for a rule registered by an installed `flakeforge.rules`
+  provider, where `<dist>` is the installing distribution's name (falling back to
+  the entry-point name when the distribution is unavailable).
+
+`resolve_registry` stamps this per provider loading phase, so a provider's own
+`register_rules(registry)` — which passes only `provider=` — still yields a
+truthful `origin` with **no provider-side change**. The `flakeforge rules`
+command surfaces this field. `origin` is an additive, defaulted trailing field on
+`RuleRegistration`: constructing a registration positionally or calling
+`RuleRegistry.register` unchanged both remain valid.
 
 ## Shared execution behavior
 

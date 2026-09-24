@@ -45,6 +45,85 @@ Exit codes:
 - `1` = completed, violations found
 - `2` = invalid config, invalid invocation, or tool failure
 
+## Inspecting the effective config
+
+`flakeforge config show` prints the fully resolved, validated configuration and
+where each value came from, without linting anything. It accepts the same
+config-selection, path-anchor and override flags as `check` (`--config` /
+`--no-config`, positional paths, `--select`, `--ignore`, and so on), so it reports
+exactly what `check` would use:
+
+```bash
+flakeforge config show                       # discovered config, anchored on cwd
+flakeforge config show path/to/proj          # anchored on the target, run from anywhere
+flakeforge config show --no-config .          # what the built-in defaults are
+flakeforge config show --select X002 src      # see a CLI override take effect
+flakeforge config show --output-format json . # stable, sort_keys JSON document
+```
+
+The report names the source file and section (or `defaults`), the discovery
+anchor, and `base_dir`, then lists every config key with its effective value and
+its origin — `default`, `file`, or `cli`. Legacy-section and shadowed-file
+warnings, and an invalid config (exit `2`), surface exactly as they do for
+`check`. Only `text` (default) and `json` render the report; `github` / `sarif`
+are annotation formats for findings and are rejected here (exit `2`). Note that
+`output_format` is itself a reported key: a file's `output_format = "github"`
+shows up as data with origin `file` while the report still renders as text.
+
+> Both `config show` and `rules` resolve the registry the way `check` does, so they import the
+> project's `rule_modules`. Use `--no-config` on untrusted checkouts; see the
+> [trust boundary](docs/custom-rules.md#trust-boundary).
+
+## Listing the resolved rules
+
+`flakeforge rules` lists every rule in the resolved registry — its code, short
+description, provider origin, and whether it is enabled under the effective
+`select` / `ignore` — without linting anything. It accepts the same
+config-selection, path-anchor and override flags as `check`, and resolves the
+registry the same way (project-local `rule_modules` and installed
+`flakeforge.rules` providers included), so what it lists is what `check` would
+run:
+
+```bash
+flakeforge rules                       # every registered rule, enabled state included
+flakeforge rules --select X002         # see which rules a selector leaves enabled
+flakeforge rules --no-rule-plugins .   # hide installed entry-point providers
+flakeforge rules --no-config .         # built-ins only, ignoring project rule modules
+flakeforge rules --output-format json  # stable, sort_keys JSON document
+```
+
+Each rule's origin is one of `builtin`, `rule_module:<name>` for a project-local
+module, or `entry_point:<dist>` for an installed provider. Rows are ordered by
+code. Only `text` (default) and `json` render the report; the `github` / `sarif`
+annotation formats are rejected (exit `2`), and an invalid config exits `2`,
+exactly as for `check`.
+
+## Writing a starter config
+
+`flakeforge init` writes a fully commented starter config with every key at its
+default, so you can delete what you do not need and edit the rest:
+
+```bash
+flakeforge init                  # write ./flakeforge.toml
+flakeforge init path/to/proj     # write path/to/proj/flakeforge.toml
+flakeforge init --pyproject      # append a [tool.flakeforge] table to ./pyproject.toml
+```
+
+Unlike `check`, `config show`, and `rules`, `init` does not take the
+config-selection or path-anchor flags: it *writes* a fresh config rather than
+resolving an existing one, so `--config`, `--no-config`, and the override flags
+would have nothing to act on.
+
+It never overwrites or duplicates (there is no `--force`): it exits `2` with a
+message when the target `flakeforge.toml` already exists, when `pyproject.toml`
+already defines `[tool.flakeforge]` or the legacy `[tool.flake8_lint]`, or when a
+same-directory file of the other surface would shadow the one being written (a
+`flakeforge.toml` outranks a `pyproject.toml` section, C3). `--pyproject` creates
+`pyproject.toml` if it is absent and otherwise preserves the existing content
+byte-for-byte, appending the table after a separating blank line; a `pyproject.toml`
+that is not valid TOML is refused rather than appended to. On success it prints the
+written path and exits `0`.
+
 ## Standalone CLI
 
 `flakeforge` runs as a fully standalone linter: point it at any target and, optionally,

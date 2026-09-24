@@ -1,7 +1,7 @@
 # Task 03.0 - Config Introspection & Bootstrap
 
 **Parent milestone:** [plan.md](../plan.md)
-**Status:** ⬜ Not started (proposed)
+**Status:** ✅ Complete
 **Depends on:** [02.0](../02.0-tool-mode-config-surfaces/README.md)
 
 ## Scope
@@ -14,9 +14,9 @@ read-mostly subcommands that reuse the existing core without changing it.
 
 | #  | Document                                      | Status         | Blocks |
 |----|-----------------------------------------------|----------------|--------|
-| 01 | [`config show`](01-config-show.md)            | ⬜ Not started | -      |
-| 02 | [`rules` listing](02-rules-listing.md)        | ⬜ Not started | -      |
-| 03 | [`init`](03-init.md)                          | ⬜ Not started | -      |
+| 01 | [`config show`](01-config-show.md)            | ✅ Complete    | -      |
+| 02 | [`rules` listing](02-rules-listing.md)        | ✅ Complete    | -      |
+| 03 | [`init`](03-init.md)                          | ✅ Complete    | -      |
 
 ## Key constraints
 

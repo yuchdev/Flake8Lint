@@ -1,7 +1,7 @@
 # 01 - `flakeforge config show`
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 ## Requirements
 

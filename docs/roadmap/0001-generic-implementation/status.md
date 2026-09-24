@@ -8,7 +8,7 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 |------|----------------------------------|----------------|-------|
 | 01.0 | Standalone CLI Mode              | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, `test_docs_smoke.py`, CI `wheel-smoke` |
 | 02.0 | Tool-Mode Config Surfaces        | ✅ Complete    | `test_config.py`, `test_config_precedence.py`, `test_cli.py`, `test_api.py`, `test_discovery.py`, `test_noqa.py`, CI `wheel-smoke` |
-| 03.0 | Config Introspection & Bootstrap | ⬜ Not started | -     |
+| 03.0 | Config Introspection & Bootstrap | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, CI `wheel-smoke` |
 | 04.0 | CI Output Formats                | ✅ Complete    | `test_api.py`, `test_cli.py`, `test_config.py`, `tests/golden/sarif_basic.json` |
 | 05.0 | Incremental Adoption             | ⬜ Not started | -     |
 | 06.0 | Scale & Distribution             | ⬜ Not started | -     |
@@ -134,3 +134,45 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   `output_format` row lists all four formats.
 - Accepted LOW: SARIF/github paths for files outside `base_dir` can be absolute or contain
   `..`. Every result has level `error` (no severity mapping).
+
+### Task 03.0 - Config Introspection & Bootstrap (✅ 2026-09-24)
+
+**Delivered**
+
+- 01: `flakeforge config show` prints the effective, validated config: source file/section,
+  discovery anchor, `base_dir`, and every schema key with its value and origin
+  (`default`/`file`/`cli`). Text or stable JSON output. Origin tracking lives in config.py
+  (`resolve_config_origins`, `describe_config_source`, `CONFIG_KEYS`) and isn't part of
+  `LintConfig` equality. `cli.py` now has a shared parent parser, and `check --help` is
+  byte-identical to before.
+- 02: `flakeforge rules` lists every registered rule with its enabled/disabled state (the same
+  logic the engine uses) and provider origin (`builtin`, `rule_module:<name>`,
+  `entry_point:<dist>`). New additive `RuleRegistration.origin` plus
+  `RuleRegistry.registering_origin`; `docs/custom-rules.md` and `test_custom_rules.py` updated.
+- 03: `flakeforge init [--pyproject] [DIR]` writes all schema keys at their defaults from a
+  template (C8). A test keeps the template in step with the schema. It refuses to overwrite,
+  duplicate, shadow in either direction, or touch a malformed pyproject (exit `2`). New files
+  are created exclusively (safe against dangling symlinks), and an existing pyproject is only
+  appended to.
+
+**Tests / gate**
+
+- 306 → 353 tests, all passing (including the full `flakeforge check .` self-lint). `ruff` is clean (venv and `uv run`), the self-check is clean, and
+  `/link-check` is clean. `wheel-smoke` gained init / config show / rules / bare-`config`
+  scenarios, and the extended script passed locally.
+- `/verify-subtask`: 01 and 02 PASS; 03 checked by hand. `/pr-review`: security-auditor
+  PASS_WITH_FOLLOWUP (no CRITICAL). Its MEDIUM finding (introspection commands run
+  `rule_modules`) is documented in the Trust boundary section and the README, and its LOW
+  symlink/TOCTOU finding in `init` is fixed with tests. feature-reviewer REQUEST_CHANGES →
+  resolved: bare `flakeforge config` exited `0` via argparse help and now exits `2` (test
+  added). The reviewer's `-> None` suggestion was declined: it conflicts with the project's own
+  X008 rule.
+- Accepted: CWE-209 (a rule-module `SyntaxError` line can be echoed on stderr).
+  `cli.py` reuses the private `api._is_rule_enabled`; making it public is a possible cleanup.
+
+**Reconciliation note**
+
+- Task README Key constraint "each subcommand accepts the same `--config`/`--no-config`/anchor
+  arguments": this holds for `check`, `config show` and `rules`. It is **not applicable** to
+  `init`, which writes a new config and never reads or discovers one. Adding those flags would
+  advertise behavior it doesn't have. There is an inline note in `build_parser`.

@@ -1,7 +1,7 @@
 # 03 - `flakeforge init`
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 ## Requirements
 

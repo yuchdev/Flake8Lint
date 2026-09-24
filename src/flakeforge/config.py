@@ -562,3 +562,130 @@ _CONFIG_SCHEMA: dict[str, tuple[Callable[..., Any], Any]] = {
     "output_format": (_as_str, "text"),
     "statistics": (_as_bool, False),
 }
+
+#: The config-surface keys in schema (declaration) order. Introspection callers
+#: (``flakeforge config show``) iterate this instead of reaching into the private
+#: :data:`_CONFIG_SCHEMA`, so the reported key set stays in lockstep with C5.
+CONFIG_KEYS: tuple[str, ...] = tuple(_CONFIG_SCHEMA)
+
+#: Body of the ``flakeforge init`` starter template: every config-surface key at
+#: its default value with one explanatory comment line each. This is a
+#: hand-written literal, not a TOML dump, because the tool ships no TOML *writer*
+#: (plan contract C8). ``tests/test_cli.py`` round-trips it through ``tomllib`` and
+#: :func:`load_config` and asserts its parsed keys equal :data:`CONFIG_KEYS` and
+#: its values the :data:`_CONFIG_SCHEMA` defaults, so a schema key added without a
+#: matching entry here fails CI. The same body serves both surfaces: written
+#: verbatim as ``flakeforge.toml`` or appended under a ``[tool.flakeforge]`` table.
+_CONFIG_TEMPLATE_BODY = """\
+# Glob patterns limiting which files are linted; empty means every file.
+include = []
+
+# Glob patterns excluding files from linting.
+exclude = []
+
+# Rule-code prefixes to enable; empty means every registered rule.
+select = []
+
+# Rule-code prefixes to disable.
+ignore = []
+
+# Honour `# noqa` suppression comments.
+allow_noqa = true
+
+# Path patterns (relative to this file) where `# noqa` is permitted.
+noqa_allowed = []
+
+# Path patterns (relative to this file) where `# noqa` is rejected.
+noqa_forbidden = []
+
+# Importable modules contributing extra rules.
+rule_modules = []
+
+# Load installed flakeforge.rules entry-point providers.
+rule_plugins = true
+
+# Formatter used to render results: text, json, github, or sarif.
+output_format = "text"
+
+# Append a per-code count summary to the output.
+statistics = false
+"""
+
+
+def render_config_template(*, pyproject: bool) -> str:
+    """Render the ``flakeforge init`` starter template for one config surface.
+
+    Emitted from a text template rather than a TOML writer (plan contract C8).
+    The body -- every :data:`CONFIG_KEYS` entry at its :data:`_CONFIG_SCHEMA`
+    default, one comment per key -- is identical for both surfaces; only the
+    ``[tool.flakeforge]`` table header differs, so a snippet can be moved between
+    ``flakeforge.toml`` and ``pyproject.toml`` unchanged.
+
+    :param pyproject: When ``True``, prefix the body with a ``[tool.flakeforge]``
+        table header for appending to ``pyproject.toml``; when ``False``, return
+        the flat ``flakeforge.toml`` body verbatim.
+    :returns: The rendered template text, terminated by a newline.
+    """
+    if pyproject:
+        return f"[tool.flakeforge]\n{_CONFIG_TEMPLATE_BODY}"
+    return _CONFIG_TEMPLATE_BODY
+
+
+def resolve_config_origins(
+    file_config: LintConfig,
+    cli_keys: Iterable[str],
+) -> dict[str, str]:
+    """Attribute each config-surface key to ``default``, ``file`` or ``cli``.
+
+    Implements the value-precedence contract (C2) as an explanation rather than a
+    resolution: an explicit CLI flag outranks the selected config file, which
+    outranks the built-in default. This never prints and never touches
+    :class:`LintConfig` equality; it only reads values.
+
+    A key is ``cli`` when the CLI supplied it (``cli_keys``), otherwise ``file``
+    when *file_config* differs from the built-in default for that key, otherwise
+    ``default``. Because attribution is precedence-based, a key that both the file
+    and the CLI set (e.g. the appending ``rule_modules``) is reported as ``cli``,
+    the winning source. A file that re-states a key at its default value is
+    indistinguishable from an unset one and reports ``default``.
+
+    :param file_config: The configuration as loaded from disk (before CLI
+        overrides are merged in); for ``--no-config`` this is a defaults-only
+        config, so every non-CLI key reports ``default``.
+    :param cli_keys: The schema keys the CLI explicitly overrode.
+    :returns: A mapping from every :data:`CONFIG_KEYS` entry to its origin.
+    """
+    defaults = LintConfig()
+    cli_set = set(cli_keys)
+    origins: dict[str, str] = {}
+    for key in _CONFIG_SCHEMA:
+        if key in cli_set:
+            origins[key] = "cli"
+        elif getattr(file_config, key) != getattr(defaults, key):
+            origins[key] = "file"
+        else:
+            origins[key] = "default"
+    return origins
+
+
+def describe_config_source(config: LintConfig) -> tuple[Optional[Path], Optional[str]]:
+    """Report the file and section a loaded *config* came from.
+
+    Used by ``flakeforge config show`` to name the effective source. A
+    defaults-only config (``--no-config`` or nothing discovered) has no
+    ``config_path`` and yields ``(None, None)``.
+
+    :param config: The resolved configuration to describe.
+    :returns: A ``(file, section)`` pair. *section* is ``"[tool.flake8_lint]"``
+        for a legacy pyproject section, ``"[tool.flakeforge]"`` for a canonical
+        one, and ``None`` for a standalone ``flakeforge.toml`` (whose options are
+        the whole file).
+    """
+    path = config.config_path
+    if path is None:
+        return None, None
+    if config.legacy_mode:
+        return path, "[tool.flake8_lint]"
+    if path.name == "pyproject.toml":
+        return path, "[tool.flakeforge]"
+    return path, None

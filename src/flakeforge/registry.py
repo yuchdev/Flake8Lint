@@ -31,6 +31,12 @@ class RuleLike(Protocol):
         ...
 
 
+#: Origin tag for built-in rules and any registration made outside a provider
+#: loading phase (e.g. a hand-built :class:`RuleRegistry`). See
+#: :attr:`RuleRegistration.origin`.
+BUILTIN_ORIGIN = "builtin"
+
+
 @dataclass(frozen=True)
 class RuleRegistration:
     """A rule bound to its owning provider and enablement metadata.
@@ -41,6 +47,13 @@ class RuleRegistration:
     :ivar provider: Identifier of the provider that registered the rule.
     :ivar enabled: Whether the rule runs by default.
     :ivar reserved: Whether the code is reserved and not user-selectable.
+    :ivar origin: Where the rule entered the resolved registry, as a stable
+        taxonomy independent of the provider-chosen ``provider`` label:
+        ``"builtin"``, ``"rule_module:<name>"`` for a project-local module, or
+        ``"entry_point:<dist>"`` for an installed provider. Stamped by
+        :func:`resolve_registry` per loading phase; a directly-built registry
+        leaves it at :data:`BUILTIN_ORIGIN`. Trailing field with a default, so
+        existing callers constructing a registration positionally are unaffected.
     """
 
     code: str
@@ -49,6 +62,7 @@ class RuleRegistration:
     provider: str
     enabled: bool = True
     reserved: bool = False
+    origin: str = BUILTIN_ORIGIN
 
 
 class DuplicateRuleCodeError(ValueError):
@@ -69,6 +83,28 @@ class RuleRegistry:
     def __init__(self):
         """Initialise an empty registry."""
         self._registrations: dict[str, RuleRegistration] = {}
+        self._current_origin: str = BUILTIN_ORIGIN
+
+    @contextmanager
+    def registering_origin(self, origin: str) -> Iterator[None]:
+        """Stamp every rule registered inside this block with *origin*.
+
+        :func:`resolve_registry` opens one scope per provider loading phase so a
+        provider's own ``register_rules`` -- which only passes ``provider`` --
+        still yields a truthful :attr:`RuleRegistration.origin` without any
+        provider-side change. Scopes restore the previous origin on exit, so the
+        default (:data:`BUILTIN_ORIGIN`) applies to any registration made outside
+        a scope.
+
+        :param origin: The origin tag to apply while the block is active.
+        :returns: A context manager yielding ``None``.
+        """
+        previous = self._current_origin
+        self._current_origin = origin
+        try:
+            yield
+        finally:
+            self._current_origin = previous
 
     def register(
         self,
@@ -99,6 +135,7 @@ class RuleRegistry:
             provider=provider,
             enabled=enabled,
             reserved=reserved,
+            origin=self._current_origin,
         )
 
     def get(self, code: str) -> RuleRegistration:
@@ -168,7 +205,8 @@ def resolve_registry(
     with _project_root_on_syspath(load_root):
         for module_name in module_names:
             try:
-                _load_register_function(module_name)(registry)
+                with registry.registering_origin(f"rule_module:{module_name}"):
+                    _load_register_function(module_name)(registry)
             except (DuplicateRuleCodeError, InvalidRuleCodeError):
                 raise
             except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
@@ -179,7 +217,8 @@ def resolve_registry(
             provider_label = _describe_entry_point(entry_point)
             try:
                 register_rules = entry_point.load()
-                register_rules(registry)
+                with registry.registering_origin(f"entry_point:{_entry_point_dist(entry_point)}"):
+                    register_rules(registry)
             except (DuplicateRuleCodeError, InvalidRuleCodeError):
                 raise
             except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
@@ -282,3 +321,19 @@ def _describe_entry_point(entry_point) -> str:
     if dist_name:
         return f"{entry_point.name} ({dist_name}: {entry_point.value})"
     return f"{entry_point.name} ({entry_point.value})"
+
+
+def _entry_point_dist(entry_point) -> str:
+    """Return the distribution name owning *entry_point* for origin reporting.
+
+    The installing distribution's name is the natural identity for an installed
+    provider. It is unavailable on older ``importlib.metadata`` back-ends and on
+    synthetic entry points, so the entry-point name is the fallback -- always a
+    non-empty, stable string -- keeping the ``entry_point:<dist>`` origin tag
+    populated either way.
+
+    :param entry_point: The entry point being loaded.
+    :returns: The distribution name, or the entry-point name as a fallback.
+    """
+    dist_name = getattr(getattr(entry_point, "dist", None), "name", None)
+    return dist_name or entry_point.name

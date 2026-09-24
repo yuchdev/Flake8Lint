@@ -475,3 +475,27 @@ jobs:
             echo "expected --no-config exit 1 (config skipped), got $status" >&2
             exit 1
           fi
+
+          # Introspection & bootstrap (task 03.0): init writes a config that
+          # config show and rules then read; bad invocations exit 2.
+          mkdir -p "$tmpdir/boot"
+          "$tmpdir/venv/bin/flakeforge" init "$tmpdir/boot"
+          test -f "$tmpdir/boot/flakeforge.toml"
+          set +e
+          "$tmpdir/venv/bin/flakeforge" init "$tmpdir/boot"
+          status=$?
+          set -e
+          if [ "$status" -ne 2 ]; then
+            echo "expected repeated init to refuse with exit 2, got $status" >&2
+            exit 1
+          fi
+          "$tmpdir/venv/bin/flakeforge" config show --output-format json "$tmpdir/boot" | grep -q '"discovery_anchor"'
+          "$tmpdir/venv/bin/flakeforge" rules --no-rule-plugins "$tmpdir/boot" | grep -q '^X001 '
+          set +e
+          "$tmpdir/venv/bin/flakeforge" config
+          status=$?
+          set -e
+          if [ "$status" -ne 2 ]; then
+            echo "expected bare 'config' exit 2, got $status" >&2
+            exit 1
+          fi

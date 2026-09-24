@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+- **New `flakeforge init` bootstrap command.** `flakeforge init [DIR]` writes a
+  fully commented `DIR/flakeforge.toml` with every config key at its default (one
+  comment line per key), and `flakeforge init --pyproject [DIR]` appends the same
+  body under a `[tool.flakeforge]` table in `DIR/pyproject.toml` instead —
+  creating that file when absent and otherwise preserving its existing bytes
+  verbatim before a separating blank line. The template is rendered from a text
+  template with no TOML-writer dependency (contract C8) and is kept in lockstep
+  with the config schema by a test. `init` does not take the shared
+  config-selection or path-anchor flags, because it writes a new config rather
+  than resolving one. It never overwrites or duplicates (no `--force`): it exits
+  `2` when the target `flakeforge.toml` exists, when `pyproject.toml` already
+  defines `[tool.flakeforge]` or the legacy `[tool.flake8_lint]` (or is not valid
+  TOML, in `--pyproject` mode), or when a same-directory file of the other surface
+  would shadow the one being written (contract C3). On success it prints the
+  written path and exits `0`.
+- **New `flakeforge rules` introspection command.** It lists every rule in the
+  resolved registry — code, short description, provider origin, and whether the
+  rule is enabled under the effective `select` / `ignore` — without linting. It
+  shares the same parent argument parser as `check`, resolves config and the rule
+  registry identically (project-local `rule_modules` and installed
+  `flakeforge.rules` providers included, invalid config exits `2`, warnings on
+  stderr), and reuses the engine's own enablement logic rather than
+  reimplementing selector matching. Each rule's origin is `builtin`,
+  `rule_module:<name>`, or `entry_point:<dist>`; rows are ordered by code.
+  `--output-format json` emits a stable, `sort_keys` document; only `text` and
+  `json` render the report, while the `github` / `sarif` annotation formats are
+  rejected (exit `2`). To support this, `RuleRegistration` gained an additive,
+  defaulted `origin` field stamped by `resolve_registry` per provider loading
+  phase — custom providers registering rules through `RuleRegistry.register`
+  need no change.
+- **New `flakeforge config show` introspection command.** It prints the fully
+  resolved, validated configuration and where each value came from, without
+  linting. It shares one parent argument parser with `check`, so it accepts the
+  same config-selection (`--config` / `--no-config`), path-anchor and override
+  flags and reports exactly what `check` would use — same discovery, same
+  selector validation against the resolved registry (invalid config exits `2`),
+  same legacy/shadow warnings on stderr. The report names the source file and
+  section (or `defaults`), the discovery anchor, and `base_dir`, then lists every
+  config key with its effective value and its origin (`default` / `file` / `cli`);
+  a key set by both the file and the CLI is attributed to the CLI, the winning
+  source. Origin attribution lives in a `flakeforge.config` helper and does not
+  touch `LintConfig` equality. `--output-format json` emits a stable,
+  `sort_keys` document; only `text` and `json` render the report, while the
+  `github` / `sarif` annotation formats are rejected (exit `2`). `output_format`
+  is itself a reported key, so a file's `output_format = "github"` shows up as
+  data with origin `file` while the report still renders as text.
 - **New `--statistics` per-code count summary.** `flakeforge check --statistics`
   (TOML key `statistics`, default `false`) appends a per-code summary: in `text`
   it prints aligned `code  count  description` rows (sorted by code) after the

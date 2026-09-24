@@ -397,3 +397,70 @@ def test_cli_no_config_rule_module_is_not_imported_from_target(tmp_path, monkeyp
     assert main(["check", "--no-config", "--rule-module", module_name, str(project)]) == 2
     assert "no_config_shadow_project" in capsys.readouterr().err
     assert str(project) not in sys.path
+
+
+class _Dist:
+    """Minimal stand-in for an entry point's owning distribution."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def test_registration_origin_builtin_by_default() -> None:
+    # A directly-built registry and the built-in rules both carry the builtin origin.
+    registry = RuleRegistry()
+    registry.register(LocalRule(), provider="tests.local")
+    assert registry.get("ORG001").origin == "builtin"
+    assert resolve_registry(include_entry_points=False).get("X001").origin == "builtin"
+
+
+def test_registration_origin_records_rule_module(tmp_path, monkeypatch) -> None:
+    module_name = _write_rule_package(tmp_path, "origin_demo_project", code="ORG010")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    registry = resolve_registry(rule_modules=(module_name,), include_entry_points=False)
+    assert registry.get("ORG010").origin == f"rule_module:{module_name}"
+    # Built-ins loaded alongside the module keep their own origin.
+    assert registry.get("X001").origin == "builtin"
+
+
+def test_registration_origin_records_entry_point_dist(monkeypatch) -> None:
+    def register(registry: RuleRegistry) -> None:
+        class PluginRule:
+            code = "ZZZ001"
+            description = "provider rule"
+
+            def check(self, context):
+                return ()
+
+        registry.register(PluginRule(), provider="pkg.provider")
+
+    monkeypatch.setattr(
+        "flakeforge.registry.metadata.entry_points",
+        lambda: FakeEntryPoints(
+            [FakeEntryPoint("zzz", "pkg.provider:register_rules", register, dist=_Dist("acme-rules"))]
+        ),
+    )
+    registry = resolve_registry()
+    # The installing distribution name is the origin identity when available.
+    assert registry.get("ZZZ001").origin == "entry_point:acme-rules"
+
+
+def test_registration_origin_entry_point_falls_back_to_name(monkeypatch) -> None:
+    def register(registry: RuleRegistry) -> None:
+        class PluginRule:
+            code = "ZZZ002"
+            description = "provider rule"
+
+            def check(self, context):
+                return ()
+
+        registry.register(PluginRule(), provider="pkg.provider")
+
+    # dist is None (older importlib.metadata / synthetic entry point): the
+    # entry-point name is the fallback so the origin tag stays populated.
+    monkeypatch.setattr(
+        "flakeforge.registry.metadata.entry_points",
+        lambda: FakeEntryPoints([FakeEntryPoint("solo", "pkg.provider:register_rules", register)]),
+    )
+    registry = resolve_registry()
+    assert registry.get("ZZZ002").origin == "entry_point:solo"

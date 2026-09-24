@@ -1,9 +1,11 @@
 import json
 import textwrap
+import tomllib
 
 import pytest
 
 from flakeforge.cli import main
+from flakeforge.config import CONFIG_KEYS, LintConfig, load_config
 
 
 def test_cli_version(capsys) -> None:
@@ -607,3 +609,506 @@ def test_cli_statistics_from_config_file_ignored_for_github(tmp_path, monkeypatc
     assert captured.out.startswith("::error file=sample.py")
     assert "flakeforge: statistics is ignored for the 'github' output format" in captured.err
     assert "--statistics" not in captured.err
+
+
+def _parse_show_table(out: str) -> dict[str, tuple[str, str]]:
+    """Parse the ``config show`` text table into ``{setting: (value, origin)}``."""
+    rows: dict[str, tuple[str, str]] = {}
+    body = out.split("\n\n", 1)[1]
+    for line in body.splitlines()[1:]:  # skip the header row
+        parts = line.split()
+        rows[parts[0]] = (" ".join(parts[1:-1]), parts[-1])
+    return rows
+
+
+def test_config_show_defaults_no_config(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('ignore = ["X001"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # --no-config reports pure defaults; the on-disk ignore is never consulted.
+    assert main(["config", "show", "--no-config", "sample.py"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "source:   defaults"
+    rows = _parse_show_table(out)
+    assert rows["ignore"] == ("[]", "default")
+    assert all(origin == "default" for _, origin in rows.values())
+
+
+def test_config_show_discovered_file_origins(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('ignore = ["X001"]\nexclude = ["build"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "sample.py"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].endswith("flakeforge.toml")
+    rows = _parse_show_table(out)
+    assert rows["ignore"] == ("[X001]", "file")
+    assert rows["exclude"] == ("[build]", "file")
+    assert rows["select"] == ("[]", "default")
+
+
+def test_config_show_cli_override_origins(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('ignore = ["X001"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # A CLI --select overrides; --statistics flips a bool; both report "cli".
+    assert main(["config", "show", "--select", "X002", "--statistics", "sample.py"]) == 0
+    rows = _parse_show_table(capsys.readouterr().out)
+    assert rows["select"] == ("[X002]", "cli")
+    assert rows["statistics"] == ("true", "cli")
+    assert rows["ignore"] == ("[X001]", "file")
+
+
+def test_config_show_explicit_config_file(tmp_path, monkeypatch, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "pyproject.toml").write_text('[tool.flakeforge]\nselect = ["X002"]\n', encoding="utf-8")
+    (project / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "--config", str(project / "pyproject.toml"), str(project)]) == 0
+    out = capsys.readouterr().out
+    first = out.splitlines()[0]
+    assert first.endswith("pyproject.toml [tool.flakeforge]")
+    assert _parse_show_table(out)["select"] == ("[X002]", "file")
+
+
+def test_config_show_json_is_stable_and_sorted(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('exclude = ["build"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "--output-format", "json", "--select", "X002", "sample.py"]) == 0
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    # sort_keys=True => a re-dump with the same options is byte-identical.
+    assert raw.strip() == json.dumps(payload, sort_keys=True, indent=2)
+    assert payload["settings"]["exclude"] == {"origin": "file", "value": ["build"]}
+    assert payload["settings"]["select"] == {"origin": "cli", "value": ["X002"]}
+    assert payload["source"]["file"].endswith("flakeforge.toml")
+    assert payload["source"]["section"] is None
+
+
+def test_config_show_legacy_and_shadow_warnings_on_stderr(tmp_path, monkeypatch, capsys) -> None:
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "pyproject.toml").write_text('[tool.flake8_lint]\nignore = ["X001"]\n', encoding="utf-8")
+    (legacy / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", str(legacy)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[0].endswith("pyproject.toml [tool.flake8_lint]")
+    assert "deprecated" in captured.err
+
+
+def test_config_show_invalid_config_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('exlude = ["build"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "sample.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown key 'exlude' (did you mean 'exclude'?)" in captured.err
+
+
+def test_config_show_invalid_selector_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('select = ["X999"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # Selector validation runs against the resolved registry, exactly as check does.
+    assert main(["config", "show", "sample.py"]) == 2
+    assert "Unknown select rule selector(s): X999" in capsys.readouterr().err
+
+
+def test_config_show_rejects_annotation_output_format(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "--output-format", "github", "sample.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "config show supports only text and json output, not 'github'" in captured.err
+
+
+def test_config_show_reports_output_format_key_from_file(tmp_path, monkeypatch, capsys) -> None:
+    # Double role: a file output_format=github is reported as data, but the report
+    # itself still renders as text (its own rendering is not hijacked).
+    (tmp_path / "flakeforge.toml").write_text('output_format = "github"\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "sample.py"]) == 0
+    out = capsys.readouterr().out
+    assert _parse_show_table(out)["output_format"] == ("github", "file")
+
+
+def test_config_show_missing_path_is_exit_2(tmp_path, capsys) -> None:
+    missing = tmp_path / "nope"
+    assert main(["config", "show", str(missing)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: path does not exist: {missing}" in captured.err
+
+
+def test_config_show_anchor_from_outside_the_project(tmp_path, monkeypatch, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "flakeforge.toml").write_text('ignore = ["X001"]\n', encoding="utf-8")
+    (project / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    # Run from outside: discovery still anchors on the target, so the target's
+    # own config is what config show reports (C4).
+    assert main(["config", "show", str(project)]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].endswith("project/flakeforge.toml")
+    assert lines[1] == f"anchor:   {project}"
+    assert lines[2] == f"base_dir: {project}"
+    assert _parse_show_table(out)["ignore"] == ("[X001]", "file")
+
+
+def _parse_rules_table(out: str) -> dict[str, tuple[str, str, str]]:
+    """Parse the ``rules`` text table into ``{code: (state, origin, description)}``."""
+    rows: dict[str, tuple[str, str, str]] = {}
+    for line in out.splitlines()[1:]:  # skip the header row
+        parts = line.split()
+        rows[parts[0]] = (parts[1], parts[2], " ".join(parts[3:]))
+    return rows
+
+
+def test_cli_rules_lists_builtins_enabled_with_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-config"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "code  state    origin   description"
+    rows = _parse_rules_table(out)
+    assert rows["X001"] == ("enabled", "builtin", "Do not use bare except.")
+    # Every built-in defaults to enabled and carries the builtin origin.
+    assert all(origin == "builtin" for _, origin, _ in rows.values())
+    assert all(state == "enabled" for state, _, _ in rows.values())
+    # Deterministic order by code.
+    codes = [line.split()[0] for line in out.splitlines()[1:]]
+    assert codes == sorted(codes)
+
+
+def test_cli_rules_select_from_cli_marks_disabled(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-config", "--select", "X001"]) == 0
+    rows = _parse_rules_table(capsys.readouterr().out)
+    assert rows["X001"][0] == "enabled"
+    assert rows["X002"][0] == "disabled"
+
+
+def test_cli_rules_ignore_from_config_file_marks_disabled(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('ignore = ["X001"]\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules"]) == 0
+    rows = _parse_rules_table(capsys.readouterr().out)
+    assert rows["X001"][0] == "disabled"
+    assert rows["X002"][0] == "enabled"
+
+
+def test_cli_rules_reports_rule_module_origin(tmp_path, monkeypatch, capsys) -> None:
+    package = tmp_path / "demo_project"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "lint_rules.py").write_text(
+        textwrap.dedent(
+            """
+            from flakeforge import RuleRegistry, RuleViolation
+
+            class LocalRule:
+                code = "ORG001"
+                description = "Local rule"
+
+                def check(self, context):
+                    yield RuleViolation(context.filename, 1, 0, self.code, "local rule")
+
+            def register_rules(registry: RuleRegistry) -> None:
+                registry.register(LocalRule(), provider="demo_project.lint_rules")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('rule_modules = ["demo_project.lint_rules"]\n', encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules"]) == 0
+    rows = _parse_rules_table(capsys.readouterr().out)
+    assert rows["ORG001"] == ("enabled", "rule_module:demo_project.lint_rules", "Local rule")
+
+
+def test_cli_rules_reports_entry_point_origin(monkeypatch, tmp_path, capsys) -> None:
+    _entry_points_with_zzz(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules"]) == 0
+    rows = _parse_rules_table(capsys.readouterr().out)
+    assert rows["ZZZ001"] == ("enabled", "entry_point:demo", "provider rule")
+
+
+def test_cli_rules_no_rule_plugins_hides_entry_point_rules(monkeypatch, tmp_path, capsys) -> None:
+    _entry_points_with_zzz(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-rule-plugins"]) == 0
+    assert "ZZZ001" not in capsys.readouterr().out
+
+
+def test_cli_rules_no_config_hides_project_rule_modules(tmp_path, monkeypatch, capsys) -> None:
+    # A config's rule_modules must not load under --no-config (C7); the module
+    # here does not even exist, so loading it would be an error rather than silent.
+    (tmp_path / "flakeforge.toml").write_text('rule_modules = ["nonexistent.module"]\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-config"]) == 0
+    out = capsys.readouterr().out
+    assert "nonexistent" not in out
+    assert "X001" in out
+
+
+def test_cli_rules_json_is_stable_and_sorted(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-config", "--output-format", "json", "--select", "X001"]) == 0
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    # sort_keys=True => a re-dump with the same options is byte-identical.
+    assert raw.strip() == json.dumps(payload, sort_keys=True, indent=2)
+    codes = [rule["code"] for rule in payload["rules"]]
+    assert codes == sorted(codes)
+    first = payload["rules"][0]
+    assert first == {
+        "code": "X001",
+        "description": "Do not use bare except.",
+        "enabled": True,
+        "origin": "builtin",
+    }
+    assert payload["rules"][1]["enabled"] is False
+
+
+def test_cli_rules_invalid_config_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('select = ["X999"]\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # Selector validation runs against the resolved registry, exactly as check does.
+    assert main(["rules"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Unknown select rule selector(s): X999" in captured.err
+
+
+def test_cli_rules_missing_path_is_exit_2(tmp_path, capsys) -> None:
+    missing = tmp_path / "nope"
+    assert main(["rules", str(missing)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: path does not exist: {missing}" in captured.err
+
+
+def test_cli_rules_rejects_annotation_output_format(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["rules", "--no-config", "--output-format", "sarif"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "rules supports only text and json output, not 'sarif'" in captured.err
+
+
+def _default_config_mapping() -> dict:
+    """Return every config key mapped to the default a fresh LintConfig holds."""
+    defaults = LintConfig()
+    mapping = {}
+    for key in CONFIG_KEYS:
+        value = getattr(defaults, key)
+        mapping[key] = list(value) if isinstance(value, tuple) else value
+    return mapping
+
+
+def test_init_template_keys_match_schema_and_defaults() -> None:
+    # Lockstep guard: the rendered template must carry exactly CONFIG_KEYS, each
+    # at its schema default, so a new schema key without a template entry fails CI.
+    from flakeforge.config import render_config_template
+
+    parsed = tomllib.loads(render_config_template(pyproject=False))
+    assert tuple(parsed) == CONFIG_KEYS
+    assert parsed == _default_config_mapping()
+    # The pyproject surface wraps the same body under [tool.flakeforge].
+    wrapped = tomllib.loads(render_config_template(pyproject=True))
+    assert wrapped == {"tool": {"flakeforge": _default_config_mapping()}}
+
+
+def test_init_flat_writes_defaults_and_round_trips(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    target = tmp_path / "flakeforge.toml"
+    # DIR defaults to the current directory, so the printed path is relative.
+    assert capsys.readouterr().out.strip() == "Wrote flakeforge.toml"
+    assert target.is_file()
+    # Every schema key appears at its default, one comment line per key.
+    text = target.read_text(encoding="utf-8")
+    for key in CONFIG_KEYS:
+        assert f"\n{key} = " in f"\n{text}"
+    comment_lines = [line for line in text.splitlines() if line.startswith("#")]
+    assert len(comment_lines) == len(CONFIG_KEYS)
+    # Round-trips through load_config to the built-in defaults, with no warnings.
+    loaded = load_config(target, cwd=tmp_path)
+    assert loaded == LintConfig()
+    assert loaded.warnings == ()
+
+
+def test_init_flat_accepts_explicit_directory(tmp_path, capsys) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    assert main(["init", str(project)]) == 0
+    target = project / "flakeforge.toml"
+    assert target.is_file()
+    assert capsys.readouterr().out.strip() == f"Wrote {target}"
+
+
+def test_init_pyproject_appends_and_preserves_content(tmp_path, capsys) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    original = '[project]\nname = "demo"\nversion = "0.1.0"\n'
+    pyproject.write_text(original, encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.strip() == f"Wrote {pyproject}"
+    text = pyproject.read_text(encoding="utf-8")
+    # Existing content is preserved byte-for-byte at the head of the file.
+    assert text.startswith(original)
+    assert "[tool.flakeforge]" in text
+    # Round-trips: the appended section loads to defaults with no warnings.
+    loaded = load_config(pyproject, cwd=tmp_path)
+    assert loaded == LintConfig()
+    assert loaded.warnings == ()
+
+
+def test_init_pyproject_adds_separator_when_no_trailing_newline(tmp_path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    original = '[project]\nname = "demo"'  # no trailing newline
+    pyproject.write_text(original, encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 0
+    text = pyproject.read_text(encoding="utf-8")
+    assert text.startswith(original)
+    # A separating newline is inserted so the appended table is well-formed TOML.
+    assert tomllib.loads(text)["tool"]["flakeforge"] == _default_config_mapping()
+
+
+def test_init_pyproject_creates_file_when_absent(tmp_path, capsys) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    assert main(["init", "--pyproject", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.strip() == f"Wrote {pyproject}"
+    assert pyproject.is_file()
+    loaded = load_config(pyproject, cwd=tmp_path)
+    assert loaded == LintConfig()
+    assert loaded.warnings == ()
+
+
+def test_init_refuses_existing_flakeforge_toml(tmp_path, capsys) -> None:
+    target = tmp_path / "flakeforge.toml"
+    target.write_text('select = ["X001"]\n', encoding="utf-8")
+    assert main(["init", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: {target} already exists" in captured.err
+    # The pre-existing file is left untouched.
+    assert target.read_text(encoding="utf-8") == 'select = ["X001"]\n'
+
+
+def test_init_pyproject_refuses_existing_canonical_section(tmp_path, capsys) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    original = '[tool.flakeforge]\nselect = ["X001"]\n'
+    pyproject.write_text(original, encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: {pyproject} already defines [tool.flakeforge]" in captured.err
+    assert pyproject.read_text(encoding="utf-8") == original
+
+
+def test_init_pyproject_refuses_existing_legacy_section(tmp_path, capsys) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    original = '[tool.flake8_lint]\nselect = ["X001"]\n'
+    pyproject.write_text(original, encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: {pyproject} already defines [tool.flake8_lint]" in captured.err
+    assert pyproject.read_text(encoding="utf-8") == original
+
+
+def test_init_pyproject_refuses_malformed_pyproject(tmp_path, capsys) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    original = "this is = = not valid toml\n"
+    pyproject.write_text(original, encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: {pyproject} is not valid TOML" in captured.err
+    # Refusal must not append to a file it could not parse.
+    assert pyproject.read_text(encoding="utf-8") == original
+
+
+def test_init_nonexistent_directory_is_exit_2(tmp_path, capsys) -> None:
+    missing = tmp_path / "nope"
+    assert main(["init", str(missing)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"flakeforge: not a directory: {missing}" in captured.err
+
+
+def test_init_flat_refuses_when_pyproject_section_would_be_shadowed(tmp_path, capsys) -> None:
+    # C3 shadowing: a same-dir flakeforge.toml outranks a pyproject section, so
+    # writing one would silently shadow the existing [tool.flakeforge].
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[tool.flakeforge]\nselect = ["X001"]\n', encoding="utf-8")
+    assert main(["init", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "would shadow it" in captured.err
+    assert not (tmp_path / "flakeforge.toml").exists()
+
+
+def test_init_flat_writes_despite_malformed_sibling_pyproject(tmp_path, capsys) -> None:
+    # A malformed pyproject can never be loaded, so it cannot be shadowed; the
+    # flat write proceeds (mirrors config's tolerant same-dir shadow detection).
+    (tmp_path / "pyproject.toml").write_text("this is = = not toml\n", encoding="utf-8")
+    assert main(["init", str(tmp_path)]) == 0
+    target = tmp_path / "flakeforge.toml"
+    assert capsys.readouterr().out.strip() == f"Wrote {target}"
+    assert load_config(target, cwd=tmp_path) == LintConfig()
+
+
+def test_init_pyproject_refuses_when_flakeforge_toml_would_shadow(tmp_path, capsys) -> None:
+    # The mirror case: an existing flakeforge.toml would shadow a new pyproject table.
+    flat = tmp_path / "flakeforge.toml"
+    flat.write_text('select = ["X001"]\n', encoding="utf-8")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    assert main(["init", "--pyproject", str(tmp_path)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "would shadow" in captured.err
+    # The untouched pyproject keeps no flakeforge table.
+    assert "flakeforge" not in pyproject.read_text(encoding="utf-8")
+
+
+def test_cli_init_refuses_dangling_symlink_target(tmp_path, capsys) -> None:
+    elsewhere = tmp_path / "elsewhere.toml"
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "flakeforge.toml").symlink_to(elsewhere)
+
+    assert main(["init", str(project)]) == 2
+    assert "already exists" in capsys.readouterr().err
+    assert not elsewhere.exists()
+
+
+def test_cli_init_pyproject_refuses_dangling_symlink_target(tmp_path, capsys) -> None:
+    elsewhere = tmp_path / "elsewhere.toml"
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").symlink_to(elsewhere)
+
+    assert main(["init", "--pyproject", str(project)]) == 2
+    assert "already exists" in capsys.readouterr().err
+    assert not elsewhere.exists()
+
+
+def test_cli_bare_config_command_is_invalid_invocation(capsys) -> None:
+    assert main(["config"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "config requires a subcommand" in captured.err

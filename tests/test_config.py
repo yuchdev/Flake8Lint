@@ -1,12 +1,15 @@
 import pytest
 
 from flakeforge.config import (
+    CONFIG_KEYS,
     LEGACY_SECTION_WARNING,
     ConfigValidationError,
     LintConfig,
+    describe_config_source,
     discovery_anchor,
     isolated_config,
     load_config,
+    resolve_config_origins,
     validate_config,
 )
 
@@ -494,3 +497,34 @@ def test_explicit_config_pyproject_without_section_is_error(tmp_path) -> None:
     )
     with pytest.raises(ConfigValidationError):
         load_config("pyproject.toml", cwd=tmp_path)
+
+
+def test_resolve_config_origins_marks_file_default_and_cli() -> None:
+    file_config = LintConfig(ignore=("X001",))
+    origins = resolve_config_origins(file_config, cli_keys={"select"})
+    assert set(origins) == set(CONFIG_KEYS)
+    assert origins["ignore"] == "file"  # differs from default
+    assert origins["select"] == "cli"  # supplied on the CLI
+    assert origins["include"] == "default"  # untouched
+
+
+def test_resolve_config_origins_cli_wins_over_file() -> None:
+    # A key both the file and the CLI set is attributed to the winning source.
+    file_config = LintConfig(select=("X001",))
+    origins = resolve_config_origins(file_config, cli_keys={"select"})
+    assert origins["select"] == "cli"
+
+
+def test_describe_config_source_defaults_and_sections(tmp_path) -> None:
+    assert describe_config_source(LintConfig()) == (None, None)
+
+    ff = tmp_path / "flakeforge.toml"
+    standalone = LintConfig(config_path=ff)
+    assert describe_config_source(standalone) == (ff, None)
+
+    pyproject = tmp_path / "pyproject.toml"
+    canonical = LintConfig(config_path=pyproject)
+    assert describe_config_source(canonical) == (pyproject, "[tool.flakeforge]")
+
+    legacy = LintConfig(config_path=pyproject, legacy_mode=True)
+    assert describe_config_source(legacy) == (pyproject, "[tool.flake8_lint]")
