@@ -7,7 +7,7 @@ terminates-when: The target task's row in the milestone status.md shows ✅ Comp
 
 # implement-subtasks - per-subtask implementation loop for one task
 
-This loop takes **one task** (e.g. "Hello World Endpoint", task `1.0`) and drives it to
+This loop takes **one task** (e.g. "Standalone CLI Mode", task `1.0`) and drives it to
 completion. Each iteration implements **exactly one** pending subtask, verifies it against
 its spec, runs the relevant quality-gate skills, and records progress. The loop
 re-schedules itself until the whole task is ✅ Complete.
@@ -30,7 +30,7 @@ docs/roadmap/{NNNN}-{milestone-slug}/plan.md          → find the task in ## Ta
 - `0001/1.0` or `0001 1.0` - explicit milestone + task number.
 - `1.0` - task number only; resolve the milestone by scanning every
   `docs/roadmap/{NNNN}-*/plan.md` `## Tasks` table for that number.
-- `"Hello World Endpoint"` - task name; matched (case-insensitive, substring) against the
+- `"Standalone CLI Mode"` - task name; matched (case-insensitive, substring) against the
   `Name` column of the same tables.
 
 If the argument matches zero or more than one task, **stop** and ask the user to
@@ -55,13 +55,13 @@ Instead, resolve once and persist a small cursor:
 ```
 ```json
 {
-  "milestone_path": "docs/roadmap/0001-working-implementation",
+  "milestone_path": "docs/roadmap/0001-generic-implementation",
   "task_number": "1.0",
-  "task_name": "Hello World Endpoint",
-  "task_folder": "docs/roadmap/0001-working-implementation/01.0-hello-world-endpoint",
+  "task_name": "Standalone CLI Mode",
+  "task_folder": "docs/roadmap/0001-generic-implementation/01.0-standalone-cli-mode",
   "subtask_heading": "## Subtasks",
   "subtask_queue": [
-    {"nn": "01", "slug": "config-model", "status": "complete"},
+    {"nn": "01", "slug": "target-anchored-discovery", "status": "complete"},
     {"nn": "02", "slug": "...", "status": "not_started"}
   ],
   "next_index": 1

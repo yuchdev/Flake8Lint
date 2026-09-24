@@ -22,7 +22,7 @@ to stay contiguous.
 
 ## Context
 
-Milestone 0001's first subtask ([`01-config-model.md`](/docs/roadmap/0001-working-implementation/01.0-hello-world-endpoint/01-config-model.md))
+Milestone 0001's first subtask (`01-config-model.md`, an illustrative template subtask since removed)
 adds a `HealthConfig` settings model and says to "load it the same way other config
 sections are loaded in this project" - but at that point in the project's life there
 *is* no established way yet. Every subsequent feature will need its own config
@@ -103,7 +103,7 @@ prematurely is harder to undo.
 
 ## Validation / Rollout
 
-- `HealthConfig` ([`01-config-model.md`](/docs/roadmap/0001-working-implementation/01.0-hello-world-endpoint/01-config-model.md))
+- `HealthConfig` (`01-config-model.md`, an illustrative template subtask since removed)
   is the first section built on this pattern; its default-value-vs-override test
   doubles as the acceptance check for this decision - if that test needs
   environment mutation instead of a constructor kwarg, this ADR's Decision isn't
@@ -117,5 +117,5 @@ prematurely is harder to undo.
 
 ## Links
 
-- **Roadmap task:** [`01-config-model.md`](/docs/roadmap/0001-working-implementation/01.0-hello-world-endpoint/01-config-model.md) - the first (and, at this milestone, only) consumer.
+- **Roadmap task:** `01-config-model.md` (illustrative template subtask, since removed) - the first (and, at this milestone, only) consumer.
 - **Diagrams:** [assets/0001-config-source-precedence.mmd](assets/0001-config-source-precedence.mmd)
