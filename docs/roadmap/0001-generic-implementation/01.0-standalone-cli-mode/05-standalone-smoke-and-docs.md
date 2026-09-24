@@ -1,7 +1,7 @@
 # 05 - Standalone smoke tests and docs
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [02](02-cli-toml-parameter-parity.md), [03](03-isolated-mode-and-path-flags.md), [04](04-project-root-rule-imports.md)
 
 ## Requirements

@@ -1,7 +1,7 @@
 # Task 01.0 - Standalone CLI Mode
 
 **Parent milestone:** [plan.md](../plan.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 ## Scope
 
@@ -15,11 +15,11 @@ every setting in that file. Fixes baseline gaps G1-G4 in [plan.md](../plan.md#ba
 
 | #  | Document                                                        | Status         | Blocks |
 |----|-----------------------------------------------------------------|----------------|--------|
-| 01 | [Target-anchored discovery](01-target-anchored-discovery.md)    | ⬜ Not started | 02, 03 |
-| 02 | [CLI ↔ TOML parameter parity](02-cli-toml-parameter-parity.md)  | ⬜ Not started | 05     |
-| 03 | [Isolated mode and path flags](03-isolated-mode-and-path-flags.md) | ⬜ Not started | 05     |
-| 04 | [Project-root rule imports](04-project-root-rule-imports.md) 🔒 | ⬜ Not started | 05     |
-| 05 | [Standalone smoke tests and docs](05-standalone-smoke-and-docs.md) | ⬜ Not started | -      |
+| 01 | [Target-anchored discovery](01-target-anchored-discovery.md)    | ✅ Complete    | 02, 03 |
+| 02 | [CLI ↔ TOML parameter parity](02-cli-toml-parameter-parity.md)  | ✅ Complete    | 05     |
+| 03 | [Isolated mode and path flags](03-isolated-mode-and-path-flags.md) | ✅ Complete    | 05     |
+| 04 | [Project-root rule imports](04-project-root-rule-imports.md) 🔒 | ✅ Complete    | 05     |
+| 05 | [Standalone smoke tests and docs](05-standalone-smoke-and-docs.md) | ✅ Complete    | -      |
 
 🔒 = security-sensitive and needs a `security-auditor` pass (plan contract C7).
 

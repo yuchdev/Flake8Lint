@@ -4,9 +4,73 @@ from flakeforge.config import (
     LEGACY_SECTION_WARNING,
     ConfigValidationError,
     LintConfig,
+    discovery_anchor,
+    isolated_config,
     load_config,
     validate_config,
 )
+
+
+def test_discovery_anchor_no_paths_returns_cwd(tmp_path) -> None:
+    assert discovery_anchor([], cwd=tmp_path) == tmp_path.resolve()
+
+
+def test_discovery_anchor_single_directory_returns_directory(tmp_path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir()
+    assert discovery_anchor([str(target)], cwd=tmp_path) == target.resolve()
+
+
+def test_discovery_anchor_single_file_returns_parent(tmp_path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir()
+    sample = target / "sample.py"
+    sample.write_text("x = 1\n", encoding="utf-8")
+    assert discovery_anchor([str(sample)], cwd=tmp_path) == target.resolve()
+
+
+def test_discovery_anchor_relative_path_resolves_against_cwd(tmp_path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir()
+    assert discovery_anchor(["proj"], cwd=tmp_path) == target.resolve()
+
+
+def test_discovery_anchor_several_paths_returns_common_ancestor(tmp_path) -> None:
+    pkg_a = tmp_path / "proj" / "pkg_a"
+    pkg_b = tmp_path / "proj" / "pkg_b"
+    pkg_a.mkdir(parents=True)
+    pkg_b.mkdir(parents=True)
+    anchor = discovery_anchor([str(pkg_a), str(pkg_b)], cwd=tmp_path)
+    assert anchor == (tmp_path / "proj").resolve()
+
+
+def test_discovery_anchor_several_files_in_same_directory(tmp_path) -> None:
+    target = tmp_path / "proj"
+    target.mkdir()
+    first = target / "a.py"
+    second = target / "b.py"
+    first.write_text("x = 1\n", encoding="utf-8")
+    second.write_text("y = 2\n", encoding="utf-8")
+    anchor = discovery_anchor([str(first), str(second)], cwd=tmp_path)
+    assert anchor == target.resolve()
+
+
+def test_isolated_config_ignores_on_disk_config_and_anchors_base_dir(tmp_path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "flakeforge.toml").write_text('ignore = ["X001"]\nrule_modules = ["evil"]\n', encoding="utf-8")
+    config = isolated_config([str(project)], cwd=tmp_path)
+    # Defaults only: nothing from the hostile file leaks in (C3/C7).
+    assert config == LintConfig()
+    assert config.ignore == ()
+    assert config.rule_modules == ()
+    # Patterns resolve against the discovery anchor (C6).
+    assert config.base_dir == project.resolve()
+
+
+def test_isolated_config_no_paths_anchors_on_cwd(tmp_path) -> None:
+    config = isolated_config([], cwd=tmp_path)
+    assert config.base_dir == tmp_path.resolve()
 
 
 def test_load_config_from_pyproject_section(tmp_path) -> None:
@@ -112,3 +176,39 @@ def test_merge_normalizes_code_prefixes_without_touching_path_fields() -> None:
     assert merged.select == ("X0",)
     assert merged.ignore == ("X002",)
     assert merged.noqa_allowed == ("src/example.py",)
+
+
+def test_config_defaults_output_format_and_rule_plugins() -> None:
+    config = LintConfig.from_mapping({})
+    assert config.output_format == "text"
+    assert config.rule_plugins is True
+
+
+def test_config_parses_output_format_and_rule_plugins_from_file(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'output_format = "json"\nrule_plugins = false\n',
+        encoding="utf-8",
+    )
+    config = load_config(cwd=tmp_path)
+    assert config.output_format == "json"
+    assert config.rule_plugins is False
+
+
+def test_config_rejects_non_string_output_format() -> None:
+    with pytest.raises(ConfigValidationError, match="output_format"):
+        LintConfig.from_mapping({"output_format": 1})
+
+
+def test_config_rejects_non_boolean_rule_plugins() -> None:
+    with pytest.raises(ConfigValidationError, match="rule_plugins"):
+        LintConfig.from_mapping({"rule_plugins": "false"})
+
+
+def test_merge_overrides_output_format_and_rule_plugins_in_both_directions() -> None:
+    file_config = LintConfig(output_format="json", rule_plugins=False)
+    # None leaves the file value intact.
+    assert file_config.merge(output_format=None, rule_plugins=None) == file_config
+    # Explicit values override the file value in either direction.
+    overridden = file_config.merge(output_format="text", rule_plugins=True)
+    assert overridden.output_format == "text"
+    assert overridden.rule_plugins is True

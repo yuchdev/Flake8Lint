@@ -1,7 +1,7 @@
 # 02 - CLI ↔ TOML parameter parity
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [01-target-anchored-discovery.md](01-target-anchored-discovery.md)
 
 ## Requirements

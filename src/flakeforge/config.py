@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
@@ -24,9 +25,12 @@ class LintConfig:
     :ivar select: Rule-code prefixes to enable; empty means all rules.
     :ivar ignore: Rule-code prefixes to disable.
     :ivar allow_noqa: Whether ``# noqa`` suppression is honoured.
-    :ivar noqa_allowed: Path patterns where ``# noqa`` is permitted.
-    :ivar noqa_forbidden: Path patterns where ``# noqa`` is rejected.
+    :ivar noqa_allowed: Path patterns where ``# noqa`` is permitted (file-only).
+    :ivar noqa_forbidden: Path patterns where ``# noqa`` is rejected (file-only).
     :ivar rule_modules: Importable modules contributing extra rules.
+    :ivar rule_plugins: Whether installed ``flakeforge.rules`` entry-point
+        providers are loaded.
+    :ivar output_format: Name of the formatter used to render results.
     :ivar base_dir: Directory patterns are resolved against; excluded from equality.
     :ivar config_path: Path the config was loaded from; excluded from equality.
     :ivar legacy_mode: Whether a deprecated config section was used.
@@ -41,6 +45,8 @@ class LintConfig:
     noqa_allowed: tuple[str, ...] = ()
     noqa_forbidden: tuple[str, ...] = ()
     rule_modules: tuple[str, ...] = ()
+    rule_plugins: bool = True
+    output_format: str = "text"
     base_dir: Optional[Path] = field(default=None, compare=False)
     config_path: Optional[Path] = field(default=None, compare=False)
     legacy_mode: bool = field(default=False, compare=False)
@@ -78,11 +84,25 @@ class LintConfig:
                 field_name="noqa_forbidden",
             ),
             rule_modules=_as_str_tuple(payload.get("rule_modules"), field_name="rule_modules"),
+            rule_plugins=_as_bool(payload.get("rule_plugins", True), field_name="rule_plugins"),
+            output_format=_as_str(payload.get("output_format", "text"), field_name="output_format"),
             base_dir=base_dir,
             config_path=config_path,
             legacy_mode=legacy_mode,
             warnings=tuple(warnings),
         )
+
+    @property
+    def rule_module_root(self) -> Optional[Path]:
+        """Directory to put on ``sys.path`` while project ``rule_modules`` load.
+
+        Only a config actually loaded from a file vouches for its directory
+        (plan contract C7). Defaults-only configs -- ``--no-config`` or no
+        config file found -- return ``None``, so an explicit ``--rule-module``
+        resolves from the existing ``sys.path`` and the target directory is
+        never trusted implicitly.
+        """
+        return self.base_dir if self.config_path is not None else None
 
     def merge(
         self,
@@ -95,6 +115,8 @@ class LintConfig:
         noqa_allowed: Optional[tuple[str, ...]] = None,
         noqa_forbidden: Optional[tuple[str, ...]] = None,
         rule_modules: Optional[tuple[str, ...]] = None,
+        rule_plugins: Optional[bool] = None,
+        output_format: Optional[str] = None,
         warnings: Optional[tuple[str, ...]] = None,
     ) -> LintConfig:
         """Return a copy with the supplied (non-``None``) fields overridden.
@@ -114,8 +136,74 @@ class LintConfig:
             noqa_allowed=self.noqa_allowed if noqa_allowed is None else noqa_allowed,
             noqa_forbidden=(self.noqa_forbidden if noqa_forbidden is None else noqa_forbidden),
             rule_modules=self.rule_modules if rule_modules is None else rule_modules,
+            rule_plugins=self.rule_plugins if rule_plugins is None else rule_plugins,
+            output_format=self.output_format if output_format is None else output_format,
             warnings=self.warnings if warnings is None else warnings,
         )
+
+
+def discovery_anchor(
+    paths: Sequence[Union[str, Path]],
+    *,
+    cwd: Union[str, Path],
+) -> Path:
+    """Resolve the directory config discovery should walk upward from.
+
+    Implements the *discovery anchor* rule (plan contract C4): the standalone
+    CLI anchors config discovery on the lint *target* rather than the process
+    working directory, so ``flakeforge check /path/proj`` honours
+    ``/path/proj``'s config even when run from elsewhere.
+
+    :param paths: The positional path arguments as given on the command line;
+        relative entries are resolved against *cwd*.
+    :param cwd: The directory relative paths and the empty case resolve against.
+    :returns: An absolute directory path:
+
+        * no paths -> *cwd*;
+        * one path -> that directory, or its parent when the path is a file;
+        * several paths -> the deepest common ancestor directory.
+    """
+    root = Path(cwd).resolve()
+    resolved = [_resolve_against(root, path) for path in paths]
+    if not resolved:
+        return root
+    if len(resolved) == 1:
+        return _as_directory(resolved[0])
+    common = Path(os.path.commonpath([str(path) for path in resolved]))
+    return _as_directory(common)
+
+
+def isolated_config(
+    paths: Sequence[Union[str, Path]],
+    *,
+    cwd: Union[str, Path],
+) -> LintConfig:
+    """Build a defaults-only configuration for ``--no-config`` isolated mode.
+
+    Skips config-file discovery entirely (plan contracts C3/C6/C7): no
+    project-local ``rule_modules`` load, and path patterns supplied on the CLI
+    resolve against the discovery anchor (C4) via ``base_dir``. Only built-in
+    defaults, the CLI overrides the caller overlays, and installed entry-point
+    providers (governed by the merged ``rule_plugins`` flag) take effect.
+
+    :param paths: The positional path arguments; used only to locate the anchor.
+    :param cwd: The directory relative paths and the empty case resolve against.
+    :returns: An empty :class:`LintConfig` whose ``base_dir`` is the anchor.
+    """
+    return LintConfig(base_dir=discovery_anchor(paths, cwd=cwd))
+
+
+def _resolve_against(root: Path, path: Union[str, Path]) -> Path:
+    """Return *path* resolved to an absolute location under *root* if relative."""
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    return candidate.resolve()
+
+
+def _as_directory(path: Path) -> Path:
+    """Return *path* itself, or its parent when it names an existing file."""
+    return path.parent if path.is_file() else path
 
 
 def load_config(
@@ -308,3 +396,10 @@ def _as_bool(value: Any, *, field_name: str) -> bool:
     if isinstance(value, bool):
         return value
     raise ConfigValidationError(f"{field_name} must be a boolean")
+
+
+def _as_str(value: Any, *, field_name: str) -> str:
+    """Return *value* if it is a ``str``, else raise a validation error."""
+    if isinstance(value, str):
+        return value
+    raise ConfigValidationError(f"{field_name} must be a string")

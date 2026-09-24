@@ -197,3 +197,128 @@ jobs:
             echo "expected flake8 plugin exit code 1, got $status" >&2
             exit 1
           fi
+
+          # --- Standalone CLI scenarios (run from a cwd OUTSIDE the fixture) ---
+          # The commands below stay in the checkout root and pass absolute target
+          # paths, so config discovery must anchor on the target, not the cwd.
+          mkdir -p \
+            "$tmpdir/anchored/proj" \
+            "$tmpdir/cli_params/proj" \
+            "$tmpdir/local_rules/proj/proj_rules"
+
+          # Scenario 1 (G1): the target's own flakeforge.toml is honored even
+          # though flakeforge is invoked from outside the project. The config
+          # ignores X005 -- the only code app.py would trigger -- so a run that
+          # honors it is clean (exit 0); the default all-rules run would exit 1.
+          cat > "$tmpdir/anchored/proj/app.py" <<'PY'
+          def greet(name: str) -> str:
+              return name
+          PY
+          cat > "$tmpdir/anchored/proj/flakeforge.toml" <<'TOML'
+          ignore = ["X005"]
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check "$tmpdir/anchored/proj"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected anchored-config clean exit code 0, got $status" >&2
+            exit 1
+          fi
+
+          # Scenario 2 (G2): a CLI-parameters-only config file passed via --config
+          # (output_format, rule_plugins, select) is honored. select=["X005"]
+          # fires on app.py, output_format="json" shapes stdout, exit code is 1.
+          cat > "$tmpdir/cli_params/proj/app.py" <<'PY'
+          def greet(name: str) -> str:
+              return name
+          PY
+          cat > "$tmpdir/cli_params/ci.toml" <<'TOML'
+          output_format = "json"
+          rule_plugins = false
+          select = ["X005"]
+          TOML
+          set +e
+          out="$("$tmpdir/venv/bin/flakeforge" check --config "$tmpdir/cli_params/ci.toml" "$tmpdir/cli_params/proj" 2>/dev/null)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected cli-params config exit code 1, got $status" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q '"files_checked"'; then
+            echo "expected JSON output_format from the config file" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q '"code": "X005"'; then
+            echo "expected X005 in the JSON payload" >&2
+            exit 1
+          fi
+
+          # Scenario 3 (03): --no-config ignores the target's project config. The
+          # same tree as scenario 1 (flakeforge.toml ignores X005) now reports
+          # X005 because discovery is skipped and defaults enable every rule.
+          set +e
+          out="$("$tmpdir/venv/bin/flakeforge" check --no-config "$tmpdir/anchored/proj/app.py" 2>/dev/null)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected --no-config exit code 1, got $status" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q 'X005'; then
+            echo "expected X005 to fire once --no-config skips the project config" >&2
+            exit 1
+          fi
+
+          # Scenario 4 (G4): a project-local rule_modules provider loads from a
+          # project that is NOT installed and is NOT on PYTHONPATH. The loaded
+          # config file vouches for its own directory, which is placed first on
+          # sys.path only while the module imports (contract C7).
+          cat > "$tmpdir/local_rules/proj/proj_rules/__init__.py" <<'PY'
+          PY
+          cat > "$tmpdir/local_rules/proj/proj_rules/lint_rules.py" <<'PY'
+          import ast
+          from flakeforge import RuleContext, RuleRegistry, RuleViolation
+
+          class NoPrintRule:
+              code = "ACME001"
+              description = "Do not call print() in production code."
+
+              def check(self, context: RuleContext):
+                  for node in ast.walk(context.tree):
+                      if (
+                          isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Name)
+                          and node.func.id == "print"
+                      ):
+                          yield RuleViolation(
+                              context.filename,
+                              node.lineno,
+                              node.col_offset,
+                              self.code,
+                              self.description,
+                          )
+
+          def register_rules(registry: RuleRegistry) -> None:
+              registry.register(NoPrintRule(), provider="proj_rules.lint_rules")
+          PY
+          cat > "$tmpdir/local_rules/proj/app.py" <<'PY'
+          print("hello")
+          PY
+          cat > "$tmpdir/local_rules/proj/flakeforge.toml" <<'TOML'
+          rule_modules = ["proj_rules.lint_rules"]
+          select = ["ACME001"]
+          TOML
+          set +e
+          out="$("$tmpdir/venv/bin/flakeforge" check "$tmpdir/local_rules/proj" 2>/dev/null)"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected project-local rule_modules exit code 1, got $status" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$out" | grep -q 'ACME001'; then
+            echo "expected ACME001 from an uninstalled, non-PYTHONPATH rule module" >&2
+            exit 1
+          fi

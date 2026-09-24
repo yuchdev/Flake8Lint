@@ -45,6 +45,82 @@ Exit codes:
 - `1` = completed, violations found
 - `2` = invalid config, invalid invocation, or tool failure
 
+## Standalone CLI
+
+`flakeforge` runs as a fully standalone linter: point it at any target and, optionally,
+pass a single TOML file that carries the same parameters as the command line. It does not
+need to share the target project's virtualenv, and it does not need to be run from the
+project root.
+
+### Config discovery is anchored on the target
+
+Config discovery walks upward from the *discovery anchor* — the lint target — not from the
+current working directory, so `flakeforge check path/to/proj` honours
+`path/to/proj/flakeforge.toml` even when it is invoked from elsewhere:
+
+- **C3 — config-file selection.** `--config PATH` wins; otherwise `--no-config` (built-in
+  defaults only); otherwise discovery. Within each directory, nearest first:
+  `flakeforge.toml` > `pyproject.toml [tool.flakeforge]` > `pyproject.toml
+  [tool.flake8_lint]` (deprecated). The first directory with a match wins.
+- **C4 — discovery anchor.** No path arguments → the current directory. One path → that
+  directory (a file counts as its parent directory). Several paths → their deepest common
+  ancestor directory. Linting several unrelated projects in one run is out of scope.
+
+A path argument that does not exist is an invalid invocation (exit code `2`).
+
+### A config file that carries the CLI parameters
+
+Every `check` flag has a TOML key and every TOML key has a flag, so one config file can
+stand in for a long command line. For example, this CI profile:
+
+```toml
+# ci.toml
+output_format = "json"
+rule_plugins = false
+select = ["X001", "X005"]
+```
+
+is equivalent to the flags:
+
+```bash
+flakeforge check --output-format json --no-rule-plugins --select X001,X005 src
+```
+
+Pass the file explicitly with `--config`, which wins over discovery:
+
+```bash
+flakeforge check --config ci.toml src
+```
+
+### CLI ↔ TOML parameter map
+
+| CLI                                    | TOML key                         | Type / default                     |
+|----------------------------------------|----------------------------------|------------------------------------|
+| `--select`                             | `select`                         | list[str] / `[]`                   |
+| `--ignore`                             | `ignore`                         | list[str] / `[]`                   |
+| `--include`                            | `include`                        | list[str] / `[]`                   |
+| `--exclude`                            | `exclude`                        | list[str] / `[]`                   |
+| `--noqa` / `--no-noqa`                 | `allow_noqa`                     | bool / `true`                      |
+| `--rule-module`                        | `rule_modules`                   | list[str] / `[]`                   |
+| `--rule-plugins` / `--no-rule-plugins` | `rule_plugins`                   | bool / `true`                      |
+| `--output-format`                      | `output_format`                  | `"text"` / `"json"`, default `"text"` |
+| `--no-config`                          | *(CLI-only, no TOML key)*        | flag; skip discovery, defaults + CLI |
+| *(file-only, no CLI flag)*             | `noqa_allowed`, `noqa_forbidden` | list[str] / `[]`                   |
+
+`noqa_allowed` and `noqa_forbidden` are **file-only**: they have no matching CLI
+flag and can be set only in a config file. Boolean flags use
+`argparse.BooleanOptionalAction`, so `--noqa`/`--no-noqa` and
+`--rule-plugins`/`--no-rule-plugins` can override a file's value in either
+direction. An unknown `output_format` is a config error (exit code `2`).
+
+`--include`/`--exclude` are repeatable and comma-splittable (like `--select`)
+and **replace** the config file's lists rather than extend them. `--no-config`
+skips discovery entirely: only built-in defaults and CLI flags apply, path
+patterns resolve against the discovery anchor, and no project-local
+`rule_modules` load (installed entry-point providers still follow
+`--rule-plugins`; `--rule-module` stays an explicit opt-in). Passing both
+`--config` and `--no-config` is rejected with exit code `2`.
+
 ## `pyproject.toml` configuration
 
 ```toml
@@ -57,6 +133,8 @@ allow_noqa = true
 noqa_allowed = []
 noqa_forbidden = []
 rule_modules = []
+rule_plugins = true
+output_format = "text"
 ```
 
 Legacy `[tool.flake8_lint]` is still accepted as a migration fallback when the canonical section
@@ -78,15 +156,13 @@ allow_noqa = true
 noqa_allowed = []
 noqa_forbidden = []
 rule_modules = []
+rule_plugins = true
+output_format = "text"
 ```
 
-Discovery precedence:
-
-1. `--config PATH`
-2. `flakeforge.toml`
-3. `pyproject.toml` with `[tool.flakeforge]`
-4. `pyproject.toml` with `[tool.flake8_lint]` (deprecated)
-5. defaults
+Every config key maps to exactly one `check` CLI option, and vice versa; see the
+[CLI ↔ TOML parameter map](#cli--toml-parameter-map) and the config-selection and
+discovery-anchor rules in [Standalone CLI](#standalone-cli).
 
 `include` is a whitelist. `exclude` is a blacklist and wins. `select` is a whitelist. `ignore` is a blacklist and wins. `noqa_allowed` and `noqa_forbidden` are path filters for files allowed to use `# noqa`; `noqa_forbidden` wins.
 

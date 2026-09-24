@@ -108,11 +108,10 @@ def check_tree(
     effective_registry = registry or resolve_registry(
         rule_modules=effective_config.rule_modules,
         include_entry_points=True,
+        project_root=effective_config.rule_module_root,
     )
     validated_config = (
-        validate_config(effective_config, effective_registry.known_codes())
-        if validate_selectors
-        else effective_config
+        validate_config(effective_config, effective_registry.known_codes()) if validate_selectors else effective_config
     )
     context = RuleContext(tree=tree, filename=filename, source=source)
     violations: list[RuleViolation] = []
@@ -131,9 +130,7 @@ def check_tree(
             RuntimeError,
         ) as exc:  # pragma: no cover - defensive surface
             provider = registration.provider or "<unknown provider>"
-            raise RuleExecutionError(
-                f"Rule {registration.code} from {provider} failed: {exc}"
-            ) from exc
+            raise RuleExecutionError(f"Rule {registration.code} from {provider} failed: {exc}") from exc
         for violation in emitted:
             if _is_noqa_suppressed(
                 violation,
@@ -219,6 +216,7 @@ def lint_paths(
     effective_registry = registry or resolve_registry(
         rule_modules=effective_config.rule_modules,
         include_entry_points=True,
+        project_root=effective_config.rule_module_root,
     )
     validated_config = validate_config(effective_config, effective_registry.known_codes())
     target_paths = _resolve_target_paths(paths, validated_config)
@@ -249,9 +247,7 @@ def lint_paths(
             config=validated_config,
             registry=effective_registry,
         )
-        violations.extend(
-            replace(violation, filename=display_name) for violation in file_violations
-        )
+        violations.extend(replace(violation, filename=display_name) for violation in file_violations)
     return LintResult(violations=tuple(violations), files_checked=len(files))
 
 
@@ -260,8 +256,7 @@ def format_text(result: LintResult) -> str:
     if result.ok:
         return f"Checked {result.files_checked} file(s); no violations found."
     return "\n".join(
-        f"{violation.filename}:{violation.lineno}:{violation.col_offset}: "
-        f"{violation.code} {violation.message}"
+        f"{violation.filename}:{violation.lineno}:{violation.col_offset}: {violation.code} {violation.message}"
         for violation in _sorted_violations(result.violations)
     )
 
@@ -274,6 +269,37 @@ def format_json(result: LintResult) -> str:
         "violations": [violation.__dict__ for violation in _sorted_violations(result.violations)],
     }
     return json.dumps(payload, indent=2, sort_keys=True)
+
+
+KNOWN_OUTPUT_FORMATS: tuple[str, ...] = ("text", "json")
+"""Names of the formatters :func:`format_result` can render (04.0 extends this)."""
+
+_FORMATTERS = {"text": format_text, "json": format_json}
+
+
+def validate_output_format(output_format: str) -> str:
+    """Return *output_format* if it names a known formatter.
+
+    :param output_format: The requested formatter name.
+    :returns: The validated formatter name, unchanged.
+    :raises ValueError: If *output_format* is not a registered formatter; the
+        CLI maps this to exit code ``2`` (plan contract C1).
+    """
+    if output_format not in _FORMATTERS:
+        known = ", ".join(KNOWN_OUTPUT_FORMATS)
+        raise ValueError(f"Unknown output format {output_format!r}; choose from {known}")
+    return output_format
+
+
+def format_result(result: LintResult, output_format: str) -> str:
+    """Render *result* using the formatter named by *output_format*.
+
+    :param result: The lint outcome to render.
+    :param output_format: Name of a registered formatter.
+    :returns: The rendered report text.
+    :raises ValueError: If *output_format* is not a registered formatter.
+    """
+    return _FORMATTERS[validate_output_format(output_format)](result)
 
 
 def _is_rule_enabled(code: str, config: LintConfig) -> bool:
@@ -395,15 +421,11 @@ def _resolve_target_paths(
         resolved: list[Path] = []
         for raw_path in paths:
             candidate = Path(raw_path)
-            resolved.append(
-                candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve()
-            )
+            resolved.append(candidate if candidate.is_absolute() else (Path.cwd() / candidate).resolve())
         return tuple(resolved)
     if config.include:
         return _include_traversal_roots(config.include, root_dir) or (root_dir,)
-    defaults = tuple(
-        candidate for candidate in (root_dir / "src", root_dir / "tests") if candidate.exists()
-    )
+    defaults = tuple(candidate for candidate in (root_dir / "src", root_dir / "tests") if candidate.exists())
     return defaults or (root_dir,)
 
 

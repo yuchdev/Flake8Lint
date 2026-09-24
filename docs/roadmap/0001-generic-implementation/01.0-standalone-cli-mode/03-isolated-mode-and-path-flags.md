@@ -1,7 +1,7 @@
 # 03 - Isolated mode and path flags
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [01-target-anchored-discovery.md](01-target-anchored-discovery.md)
 
 ## Requirements

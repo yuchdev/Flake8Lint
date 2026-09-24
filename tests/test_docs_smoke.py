@@ -1,4 +1,5 @@
 import ast
+import json
 import shutil
 import subprocess
 import sys
@@ -23,11 +24,7 @@ class NoPrintRule:
 
     def check(self, context: RuleContext):
         for node in ast.walk(context.tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "print"
-            ):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
                 yield RuleViolation(
                     context.filename,
                     node.lineno,
@@ -106,9 +103,56 @@ def test_installed_console_script_checks_cli_only_scenario() -> None:
         f"Expected exit code 1 from {cmd} in {scenario_dir.name}, "
         f"got {proc.returncode}.\nstdout: {proc.stdout}\nstderr: {proc.stderr}"
     )
-    assert "X005" in proc.stdout, (
-        f"Expected X005 in stdout from {cmd} in {scenario_dir.name}.\nstdout: {proc.stdout!r}"
+    assert "X005" in proc.stdout, f"Expected X005 in stdout from {cmd} in {scenario_dir.name}.\nstdout: {proc.stdout!r}"
+
+
+def test_readme_cli_parameters_config_matches_equivalent_flags(tmp_path) -> None:
+    """Prove the README "config file that carries the CLI parameters" example.
+
+    The Standalone CLI section claims a ``ci.toml`` holding ``output_format``,
+    ``rule_plugins`` and ``select`` is equivalent to the matching command-line
+    flags.  This runs the real console script both ways against one fixture and
+    asserts the same violation codes and the same exit code, so a regression in
+    either the parity plumbing or the documented example is caught here.
+    """
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "app.py").write_text(
+        "def greet(name: str) -> str:\n    return name\n",
+        encoding="utf-8",
     )
+    (proj / "ci.toml").write_text(
+        'output_format = "json"\nrule_plugins = false\nselect = ["X001", "X005"]\n',
+        encoding="utf-8",
+    )
+
+    cmd = _console_script_cmd()
+    from_config = subprocess.run(
+        [*cmd, "check", "--config", str(proj / "ci.toml"), str(proj)],
+        capture_output=True,
+        text=True,
+    )
+    from_flags = subprocess.run(
+        [
+            *cmd,
+            "check",
+            "--output-format",
+            "json",
+            "--no-rule-plugins",
+            "--select",
+            "X001,X005",
+            str(proj),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert from_config.returncode == 1, from_config.stderr
+    assert from_flags.returncode == from_config.returncode, from_flags.stderr
+
+    config_codes = [v["code"] for v in json.loads(from_config.stdout)["violations"]]
+    flags_codes = [v["code"] for v in json.loads(from_flags.stdout)["violations"]]
+    assert config_codes == flags_codes == ["X005"]
 
 
 def test_pytest_helper_failure_message_surfaces_violation_codes() -> None:

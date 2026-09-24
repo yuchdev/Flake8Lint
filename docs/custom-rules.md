@@ -127,7 +127,19 @@ or CLI:
 flakeforge check --rule-module my_project.lint_rules .
 ```
 
-Module import failures are reported as tool/configuration errors and name the module plus the original exception.
+Module import failures are reported as tool/configuration errors and name the module plus the base directory it was searched from, along with the original exception.
+
+## Trust boundary
+
+Project-local `rule_modules` are Python modules that `flakeforge` **imports and runs**. When the standalone CLI loads a discovered or explicit config, it puts that config's directory first on `sys.path` while those modules import, so a checkout's own rule modules load without the project being installed.
+
+This means running `flakeforge` on a repository executes the code listed in that repository's `rule_modules` (from its `flakeforge.toml` or `pyproject.toml [tool.flakeforge]`), with your user's privileges, at import time. Treat a cloned repository as untrusted input:
+
+- Run `flakeforge check --no-config <path>` on untrusted checkouts. `--no-config` loads **no** project rule modules and never places the target directory on `sys.path`.
+- `--rule-module NAME` stays an explicit opt-in. Under `--no-config`, or when no config file is found for the target, it resolves only from the existing `sys.path` (installed packages / `PYTHONPATH`), not from the target directory.
+- Installed `flakeforge.rules` entry-point providers are unaffected by this boundary; they resolve through installed package metadata, and `--no-rule-plugins` disables them.
+
+The `base_dir` placed on `sys.path` is always the resolved config directory, never a raw path argument, and it is removed again as soon as the modules finish loading (even if loading fails).
 
 ## Installed provider packages
 

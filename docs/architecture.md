@@ -29,7 +29,13 @@ That shared registration path matters because extension behavior should exercise
 `flakeforge.config` owns:
 
 - typed config parsing
+- the *discovery anchor* (`discovery_anchor()`): the directory config discovery walks
+  upward from — the lint target, not the process working directory (contract C4). No
+  path arguments resolve to the current directory, one path to that directory (a file
+  counts as its parent), and several paths to their deepest common ancestor.
 - discovery precedence for `--config`, `flakeforge.toml`, canonical `pyproject.toml`, legacy `pyproject.toml`, and defaults
+- `--no-config` isolated mode (`isolated_config()`): defaults plus CLI flags only, with
+  path patterns resolved against the anchor and no project-local `rule_modules` loaded
 - legacy migration metadata and warnings
 - rule-selector validation against the resolved registry
 
@@ -45,6 +51,8 @@ Config parsing does not print warnings directly. Integrations choose whether to 
 
 Provider loading is deterministic. Duplicate codes and invalid codes fail fast. Import and provider registration failures are surfaced as tool/configuration errors instead of being silently ignored.
 
+Project-local `rule_modules` load with the resolved config `base_dir` (passed as `resolve_registry(project_root=...)`) placed first on `sys.path`, only while those modules import; the previous `sys.path` is restored afterward even if loading fails. This lets a standalone run import a target project's rule modules without the project being installed, and therefore executes that project's code — a trust boundary documented in [custom-rules.md](custom-rules.md#trust-boundary). `--no-config` passes no `project_root`, so no project rule modules load and the target directory is never added to `sys.path`. Entry-point providers are unaffected; they resolve through installed metadata. The `sys.path` window is process-global and not thread-safe.
+
 ## Discovery
 
 `flakeforge.discovery` owns:
@@ -54,7 +62,7 @@ Provider loading is deterministic. Duplicate codes and invalid codes fail fast. 
 - default cache/build/virtualenv directory skipping
 - stable ordering and duplicate removal
 
-The discovery layer is intentionally filesystem-focused. It does not parse rule logic or format output.
+The discovery layer is intentionally filesystem-focused. It does not parse rule logic or format output. It walks the path arguments as given; the separate *config* discovery anchor (see [Config](#config)) decides which config file governs a run, not which files are traversed.
 
 ## API runner
 

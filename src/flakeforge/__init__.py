@@ -14,6 +14,7 @@ from .api import (
     check_tree,
     lint_paths,
 )
+from .config import discovery_anchor
 from .registry import RuleRegistry
 
 
@@ -38,6 +39,7 @@ __all__ = [
     "check_file",
     "check_source",
     "check_tree",
+    "discovery_anchor",
     "lint_paths",
     "RuleRegistry",
 ]

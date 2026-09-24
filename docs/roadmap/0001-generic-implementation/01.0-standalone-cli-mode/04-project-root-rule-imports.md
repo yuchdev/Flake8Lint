@@ -1,7 +1,7 @@
 # 04 - Project-root rule imports 🔒
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Security:** requires a `security-auditor` pass (plan contract C7)
 
 ## Requirements

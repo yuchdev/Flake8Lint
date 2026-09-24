@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+import sys
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import import_module, metadata
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Optional, Protocol
 
 ENTRY_POINT_GROUP = "flakeforge.rules"
 RegisterRulesCallable = Callable[["RuleRegistry"], None]
@@ -88,9 +91,7 @@ class RuleRegistry:
         validate_rule_code(code)
         if code in self._registrations:
             existing = self._registrations[code]
-            raise DuplicateRuleCodeError(
-                f"Duplicate rule code {code}: {existing.provider} and {provider}"
-            )
+            raise DuplicateRuleCodeError(f"Duplicate rule code {code}: {existing.provider} and {provider}")
         self._registrations[code] = RuleRegistration(
             code=code,
             description=rule.description,
@@ -121,11 +122,24 @@ def resolve_registry(
     *,
     rule_modules: Iterable[str] = (),
     include_entry_points: bool = True,
+    project_root: Optional[Path] = None,
 ) -> RuleRegistry:
     """Build a registry from built-in rules plus any configured providers.
 
+    Project-local ``rule_modules`` are imported with *project_root* placed first
+    on ``sys.path``, but only for the duration of that import (plan contract C7).
+    This lets a standalone run load a target repository's rule modules without
+    the repository being installed. It also means running the linter against an
+    untrusted checkout that lists ``rule_modules`` in its config **executes that
+    repository's code**; callers that must not trust the target pass
+    ``project_root=None`` (the CLI's ``--no-config`` mode does exactly this).
+
     :param rule_modules: Importable modules exposing ``register_rules``.
     :param include_entry_points: Whether to load installed entry-point providers.
+    :param project_root: The resolved config ``base_dir`` to prepend to
+        ``sys.path`` while project-local modules load; ``None`` (or an empty
+        *rule_modules*) inserts nothing and imports from the existing path only.
+        This must be the resolved config directory, never a raw path argument.
     :returns: A populated :class:`RuleRegistry`.
     :raises RuleProviderLoadError: If a provider fails to import or register.
     :raises DuplicateRuleCodeError: If two providers claim the same code.
@@ -133,7 +147,9 @@ def resolve_registry(
     """
     # Imported lazily to avoid an import cycle: ``rules`` imports from both
     # ``api`` and this module at import time, so hoisting this to module scope
-    # raises ImportError on a partially-initialised module.
+    # raises ImportError on a partially-initialised module. Importing the
+    # linter's own internals here, before the ``sys.path`` window opens below,
+    # keeps a target module named like ``flakeforge`` from shadowing them.
     from .rules import builtin_registrations  # noqa: X006
 
     registry = RuleRegistry()
@@ -145,13 +161,18 @@ def resolve_registry(
             reserved=registration.reserved,
         )
 
-    for module_name in rule_modules:
-        try:
-            _load_register_function(module_name)(registry)
-        except (DuplicateRuleCodeError, InvalidRuleCodeError):
-            raise
-        except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
-            raise RuleProviderLoadError(f"Failed to load rule module {module_name}: {exc}") from exc
+    module_names = tuple(rule_modules)
+    resolved_root = project_root.resolve() if project_root is not None else None
+    # Insert nothing when there is no resolved base_dir or nothing to import.
+    load_root = resolved_root if module_names else None
+    with _project_root_on_syspath(load_root):
+        for module_name in module_names:
+            try:
+                _load_register_function(module_name)(registry)
+            except (DuplicateRuleCodeError, InvalidRuleCodeError):
+                raise
+            except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
+                raise RuleProviderLoadError(_rule_module_load_message(module_name, resolved_root, exc)) from exc
 
     if include_entry_points:
         for entry_point in _iter_entry_points():
@@ -162,11 +183,62 @@ def resolve_registry(
             except (DuplicateRuleCodeError, InvalidRuleCodeError):
                 raise
             except (ImportError, AttributeError, TypeError, ValueError, RuntimeError) as exc:
-                raise RuleProviderLoadError(
-                    f"Failed to load installed rule provider {provider_label}: {exc}"
-                ) from exc
+                raise RuleProviderLoadError(f"Failed to load installed rule provider {provider_label}: {exc}") from exc
 
     return registry
+
+
+@contextmanager
+def _project_root_on_syspath(project_root: Optional[Path]) -> Iterator[None]:
+    """Prepend *project_root* to ``sys.path`` for the duration of the block.
+
+    The entry is inserted at index ``0`` so project-local modules resolve ahead
+    of installed packages, then removed in ``finally`` by rebinding the same
+    list object's contents (``sys.path[:] = saved``) so any C-level or third
+    party reference to the original ``sys.path`` object stays valid. Restoration
+    runs even when the wrapped import raises. When *project_root* is ``None``
+    the context is a no-op.
+
+    .. warning::
+
+       This mutates process-global ``sys.path`` and is **not thread-safe**;
+       concurrent registry builds must not share an interpreter thread. Provider
+       loading that fans out is expected to use process isolation (a future
+       ``--jobs`` ``ProcessPoolExecutor``), never a thread pool. The restore does
+       not unwind ``sys.modules``: a target module imported here stays cached,
+       so a repository shipping a top-level module named like a stdlib module or
+       like ``flakeforge`` can still shadow a name that has not yet been imported
+       elsewhere in the process.
+
+    :param project_root: An absolute, resolved directory, or ``None`` for a
+        no-op context.
+    :returns: A context manager yielding ``None``.
+    """
+    if project_root is None:
+        yield
+        return
+    saved = sys.path[:]
+    sys.path.insert(0, str(project_root))
+    try:
+        yield
+    finally:
+        sys.path[:] = saved
+
+
+def _rule_module_load_message(module_name: str, base_dir: Optional[Path], exc: Exception) -> str:
+    """Return the :class:`RuleProviderLoadError` message for a failed import.
+
+    Names the module and the ``base_dir`` it was searched from without echoing
+    the target module's source text.
+
+    :param module_name: The rule module that failed to load.
+    :param base_dir: The resolved directory prepended to ``sys.path``, or
+        ``None`` when the module was resolved from the existing path only.
+    :param exc: The originating exception.
+    :returns: A single-line diagnostic message.
+    """
+    location = f"base_dir {base_dir}" if base_dir is not None else "the existing sys.path"
+    return f"Failed to load rule module {module_name} from {location}: {exc}"
 
 
 def _load_register_function(module_name: str) -> RegisterRulesCallable:
@@ -199,8 +271,7 @@ def validate_rule_code(code: str) -> str:
     """
     if not RULE_CODE_RE.fullmatch(code):
         raise InvalidRuleCodeError(
-            f"Invalid rule code {code!r}: expected an uppercase alphanumeric prefix "
-            "followed by three digits"
+            f"Invalid rule code {code!r}: expected an uppercase alphanumeric prefix followed by three digits"
         )
     return code
 
