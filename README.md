@@ -2,9 +2,6 @@
 
 Reusable AST-based Python lint rules with a standalone CLI, a thin Flake8 adapter, explicit pytest helpers, and first-class custom-rule support.
 
-> Formerly `flake8-lint`. Renamed to `flakeforge` to read as an extension of Flake8 rather than
-> Flake8 itself — see the [migration note](#renamed-from-flake8-lint) below.
-
 ## What it is
 
 `flakeforge` packages the copied `flake8_project_rules` behavior as a reusable distribution:
