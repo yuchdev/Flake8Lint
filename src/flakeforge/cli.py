@@ -12,7 +12,8 @@ from .api import (
     EXIT_ERROR,
     EXIT_OK,
     EXIT_VIOLATIONS,
-    KNOWN_OUTPUT_FORMATS,
+    FORMATTERS,
+    STATISTICS_FORMATS,
     format_result,
     lint_paths,
     validate_output_format,
@@ -53,7 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Load (or, with --no-rule-plugins, skip) installed flakeforge.rules providers",
     )
-    check.add_argument("--output-format", choices=KNOWN_OUTPUT_FORMATS, default=None)
+    check.add_argument("--output-format", choices=tuple(FORMATTERS), default=None)
+    check.add_argument(
+        "--statistics",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Append (or, with --no-statistics, suppress) a per-code count summary; "
+            "text and json only, ignored with a warning for github/sarif"
+        ),
+    )
     return parser
 
 
@@ -89,17 +99,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         config = validate_config(config, registry.known_codes())
         _emit_warnings(config)
+        _warn_statistics_ignored(config)
         result = lint_paths(
             tuple(Path(path) for path in args.paths),
             config=config,
             registry=registry,
         )
-        output = format_result(result, config.output_format)
+        output = format_result(result, config.output_format, statistics=config.statistics)
     except (OSError, ValueError, RuntimeError, SyntaxError) as exc:
         print(f"flakeforge: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    print(output)
+    if output:
+        print(output)
     return EXIT_OK if result.ok else EXIT_VIOLATIONS
 
 
@@ -126,6 +138,7 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
         rule_modules=_merge_unique(config.rule_modules, rule_modules) if rule_modules else None,
         rule_plugins=args.rule_plugins,
         output_format=args.output_format,
+        statistics=args.statistics,
     )
 
 
@@ -162,3 +175,18 @@ def _emit_warnings(config: LintConfig):
     """Print any accumulated configuration warnings to stderr."""
     for warning in config.warnings:
         print(f"flakeforge: {warning}", file=sys.stderr)
+
+
+def _warn_statistics_ignored(config: LintConfig):
+    """Warn (on stderr) when ``--statistics`` has no effect for the chosen format.
+
+    The ``github`` and ``sarif`` formats drop the summary (see
+    :data:`flakeforge.api.STATISTICS_FORMATS`); ``config.py`` never prints, so
+    the CLI is the one that surfaces this to the user. The exit code is
+    unaffected (plan contract C1).
+    """
+    if config.statistics and config.output_format not in STATISTICS_FORMATS:
+        print(
+            f"flakeforge: statistics is ignored for the {config.output_format!r} output format",
+            file=sys.stderr,
+        )

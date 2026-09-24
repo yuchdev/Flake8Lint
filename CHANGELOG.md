@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **New `--statistics` per-code count summary.** `flakeforge check --statistics`
+  (TOML key `statistics`, default `false`) appends a per-code summary: in `text`
+  it prints aligned `code  count  description` rows (sorted by code) after the
+  findings; in `json` it adds an additive `statistics` object mapping each
+  violated code to `{count, description}` without touching any existing key or
+  the `schema_version`. A clean run omits the `text` block and emits an empty
+  `json` object. The `github` and `sarif` formats ignore the flag and warn on
+  stderr. `--statistics`/`--no-statistics` override the file value in either
+  direction (`argparse.BooleanOptionalAction`), and the flag never changes the
+  exit code.
+- **New `github` and `sarif` CI output formats.** `flakeforge check
+  --output-format github` prints one GitHub Actions `::error` workflow command
+  per violation (workflow-command escaped, 1-based columns) so findings render as
+  inline PR annotations; a clean run prints nothing. `--output-format sarif`
+  emits a SARIF 2.1.0 document (built with the `json` stdlib only) that
+  `github/codeql-action/upload-sarif` ingests: it lists every registered rule
+  under `tool.driver.rules` and reports each violation with a `base_dir`-relative
+  `artifactLocation.uri` and a 1-based `region`. Both formats keep the frozen
+  exit codes and the deterministic violation ordering, and are valid on an empty
+  result. `flakeforge.api.LintResult` gains an additive `registered_rules` field
+  (empty by default) that `lint_paths()` populates for the SARIF formatter.
+- **JSON output now carries `"schema_version": 1`.** The `flakeforge check
+  --output-format json` document gains a top-level `schema_version` integer so
+  consumers can detect incompatible shape changes; all existing keys (`ok`,
+  `files_checked`, `violations`) are unchanged. Output formats now live in one
+  `flakeforge.api.FORMATTERS` table that drives both the CLI `--output-format`
+  choices and config validation.
 - **Config path patterns must be relative.** An absolute pattern in a config
   file's `include`, `exclude`, `noqa_allowed`, or `noqa_forbidden` (a POSIX
   `/etc` or a Windows drive/UNC path) is now a config error (CLI exit `2`) naming

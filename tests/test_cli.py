@@ -454,3 +454,156 @@ def test_cli_same_directory_shadow_prints_exactly_one_warning(tmp_path, monkeypa
     captured = capsys.readouterr()
     shadow_lines = [line for line in captured.err.splitlines() if "is shadowed by flakeforge.toml" in line]
     assert shadow_lines == ["flakeforge: pyproject.toml [tool.flakeforge] is shadowed by flakeforge.toml; remove one"]
+
+
+def test_cli_output_format_choices_are_derived_from_registry() -> None:
+    from flakeforge import api
+    from flakeforge.cli import build_parser
+
+    parser = build_parser()
+    for output_format in api.FORMATTERS:
+        namespace = parser.parse_args(["check", "--output-format", output_format])
+        assert namespace.output_format == output_format
+
+
+def test_cli_rejects_format_absent_from_registry(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as excinfo:
+        main(["check", "--output-format", "xml", "sample.py"])
+    assert excinfo.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_cli_json_output_includes_schema_version(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "json", "sample.py"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == 1
+    assert payload["files_checked"] == 1
+    assert payload["violations"][0]["code"] == "X002"
+
+
+def test_cli_github_format_keeps_exit_codes_and_emits_annotation(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # C1: violations found -> exit 1, and the GitHub annotation is on stdout.
+    assert main(["check", "--select", "X002", "--output-format", "github", "sample.py"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("::error file=sample.py,line=5,col=")
+    assert "title=X002::" in out
+
+
+def test_cli_github_format_clean_run_is_exit_zero_without_stray_line(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "clean.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # C1: clean -> exit 0; empty github output must not print a stray blank line.
+    assert main(["check", "--select", "X002", "--output-format", "github", "clean.py"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_sarif_format_keeps_exit_codes_and_emits_document(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "sarif", "sample.py"]) == 1
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["version"] == "2.1.0"
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "flakeforge"
+    assert doc["runs"][0]["results"][0]["ruleId"] == "X002"
+
+
+def test_cli_sarif_format_clean_run_is_exit_zero_valid_document(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "clean.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "sarif", "clean.py"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["runs"][0]["results"] == []
+    assert doc["runs"][0]["tool"]["driver"]["rules"]  # every registered code listed
+
+
+def test_cli_statistics_flag_appends_text_summary(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # C1: violations still exit 1; --statistics never changes the exit code.
+    assert main(["check", "--select", "X002", "--statistics", "sample.py"]) == 1
+    out = capsys.readouterr().out
+    assert "sample.py:5:" in out  # normal finding line first
+    assert "\n\nX002  1  " in out  # aligned per-code summary after a blank line
+
+
+def test_cli_json_statistics_flag_adds_object(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "json", "--statistics", "sample.py"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema_version"] == 1
+    assert payload["statistics"]["X002"]["count"] == 1
+    assert payload["statistics"]["X002"]["description"]
+
+
+def test_cli_statistics_zero_violations_omits_summary_and_exits_zero(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "clean.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--statistics", "clean.py"]) == 0
+    out = capsys.readouterr().out
+    assert out.strip() == "Checked 1 file(s); no violations found."
+
+
+def test_cli_statistics_ignored_for_github_with_warning(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "github", "--statistics", "sample.py"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.startswith("::error file=sample.py")
+    assert "\n\n" not in captured.out  # no summary block injected
+    assert "flakeforge: statistics is ignored for the 'github' output format" in captured.err
+
+
+def test_cli_statistics_ignored_for_sarif_with_warning(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--output-format", "sarif", "--statistics", "sample.py"]) == 1
+    captured = capsys.readouterr()
+    doc = json.loads(captured.out)
+    assert "statistics" not in doc  # SARIF shape untouched
+    assert "flakeforge: statistics is ignored for the 'sarif' output format" in captured.err
+
+
+def test_cli_statistics_flag_overrides_file_true_to_false(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text("statistics = true\n", encoding="utf-8")
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # File asks for statistics; --no-statistics overrides it off (C2, both directions).
+    assert main(["check", "--select", "X002", "--no-statistics", "sample.py"]) == 1
+    assert "\n\n" not in capsys.readouterr().out
+
+
+def test_cli_statistics_flag_overrides_file_false_to_true(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text("statistics = false\n", encoding="utf-8")
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X002", "--statistics", "sample.py"]) == 1
+    assert "\n\nX002  1  " in capsys.readouterr().out
+
+
+def test_cli_statistics_file_value_wins_without_flag(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text("statistics = true\n", encoding="utf-8")
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # No CLI flag (default None): the file's statistics=true is honoured.
+    assert main(["check", "--select", "X002", "sample.py"]) == 1
+    assert "\n\nX002  1  " in capsys.readouterr().out
+
+
+def test_cli_statistics_from_config_file_ignored_for_github(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(_BROAD_EXCEPT, encoding="utf-8")
+    (tmp_path / "flakeforge.toml").write_text(
+        'select = ["X002"]\noutput_format = "github"\nstatistics = true\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "sample.py"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.startswith("::error file=sample.py")
+    assert "flakeforge: statistics is ignored for the 'github' output format" in captured.err
+    assert "--statistics" not in captured.err

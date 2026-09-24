@@ -9,7 +9,7 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 | 01.0 | Standalone CLI Mode              | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, `test_docs_smoke.py`, CI `wheel-smoke` |
 | 02.0 | Tool-Mode Config Surfaces        | ✅ Complete    | `test_config.py`, `test_config_precedence.py`, `test_cli.py`, `test_api.py`, `test_discovery.py`, `test_noqa.py`, CI `wheel-smoke` |
 | 03.0 | Config Introspection & Bootstrap | ⬜ Not started | -     |
-| 04.0 | CI Output Formats                | ⬜ Not started | -     |
+| 04.0 | CI Output Formats                | ✅ Complete    | `test_api.py`, `test_cli.py`, `test_config.py`, `tests/golden/sarif_basic.json` |
 | 05.0 | Incremental Adoption             | ⬜ Not started | -     |
 | 06.0 | Scale & Distribution             | ⬜ Not started | -     |
 
@@ -106,3 +106,31 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   lint); no size limit when parsing the sibling `pyproject.toml` (same as a normal config load).
   UX idea for later: a clearer error for a `flakeforge.toml` holding an unrelated `[tool.*]`
   table.
+
+### Task 04.0 - CI Output Formats (✅ 2026-09-24)
+
+**Delivered**
+
+- 01: `api.FORMATTERS` is now the single public formatter registry, and CLI `choices` and
+  `validate_output_format()` derive from it. `KNOWN_OUTPUT_FORMATS` is kept, derived from it.
+  JSON output gains `"schema_version": 1` (additive).
+- 02: a `github` format (`::error` workflow commands, escaped with the official toolkit rules,
+  1-based columns) and a `sarif` format (SARIF 2.1.0, stdlib `json`, rule list from the new
+  `LintResult.registered_rules`, `uri` relative to `base_dir`). SARIF was validated against the
+  official OASIS schema. The CLI no longer prints an empty line when a github run is clean.
+  README gains a "CI output formats" section with an `upload-sarif` example.
+- 03: `--statistics` / TOML `statistics`. Text output gets an aligned per-code summary; JSON gets
+  an additive `statistics` object (still `schema_version` 1). `github`/`sarif` ignore it with a
+  warning. It never changes the exit code.
+
+**Tests / gate**
+
+- 267 → 306 tests, all passing. Coverage ~93%. `ruff` is clean (venv and `uv run`), the
+  self-check is clean, and `/link-check` is clean.
+- Spec compliance: 01 and 03 checked inline (short specs), 02 got a `/verify-subtask` PASS.
+- `/pr-review`: security-auditor PASS_WITH_FOLLOWUP (workflow-command injection neutralized, no
+  CRITICAL or HIGH finding). feature-reviewer REQUEST_CHANGES → resolved: the warning wording is
+  now correct when statistics comes from the config file (new test), and the README
+  `output_format` row lists all four formats.
+- Accepted LOW: SARIF/github paths for files outside `base_dir` can be absolute or contain
+  `..`. Every result has level `error` (no severity mapping).

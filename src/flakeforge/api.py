@@ -6,7 +6,8 @@ import ast
 import io
 import json
 import tokenize
-from collections.abc import Iterable, Sequence
+from collections import Counter
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional, Protocol, Union
@@ -44,10 +45,17 @@ class LintResult:
 
     :ivar violations: All violations found, in emission order.
     :ivar files_checked: Number of files that were linted.
+    :ivar registered_rules: ``(code, description)`` pairs for every rule in the
+        resolved registry, ordered by code. Populated by :func:`lint_paths` so
+        registry-aware formatters (SARIF) can list all known rules without a
+        second registry lookup; defaults to empty for hand-built results. It
+        is not part of the base JSON output, but supplies the per-code
+        descriptions when statistics are requested.
     """
 
     violations: tuple[RuleViolation, ...]
     files_checked: int
+    registered_rules: tuple[tuple[str, str], ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -248,33 +256,232 @@ def lint_paths(
             registry=effective_registry,
         )
         violations.extend(replace(violation, filename=display_name) for violation in file_violations)
-    return LintResult(violations=tuple(violations), files_checked=len(files))
-
-
-def format_text(result: LintResult) -> str:
-    """Render *result* as a human-readable text report."""
-    if result.ok:
-        return f"Checked {result.files_checked} file(s); no violations found."
-    return "\n".join(
-        f"{violation.filename}:{violation.lineno}:{violation.col_offset}: {violation.code} {violation.message}"
-        for violation in _sorted_violations(result.violations)
+    registered_rules = tuple((registration.code, registration.description) for registration in effective_registry.all())
+    return LintResult(
+        violations=tuple(violations),
+        files_checked=len(files),
+        registered_rules=registered_rules,
     )
 
 
-def format_json(result: LintResult) -> str:
-    """Render *result* as a deterministic, indented JSON document."""
-    payload = {
+def format_text(result: LintResult, *, statistics: bool = False) -> str:
+    """Render *result* as a human-readable text report.
+
+    :param result: The lint outcome to render.
+    :param statistics: When true, append a per-code count summary after the
+        violation lines (see :func:`_format_statistics_text`). A clean run has
+        no violations to summarise, so the summary is omitted entirely and only
+        the "no violations found" line is returned.
+    :returns: The rendered text report.
+    """
+    if result.ok:
+        return f"Checked {result.files_checked} file(s); no violations found."
+    body = "\n".join(
+        f"{violation.filename}:{violation.lineno}:{violation.col_offset}: {violation.code} {violation.message}"
+        for violation in _sorted_violations(result.violations)
+    )
+    if not statistics:
+        return body
+    return f"{body}\n\n{_format_statistics_text(result)}"
+
+
+def format_json(result: LintResult, *, statistics: bool = False) -> str:
+    """Render *result* as a deterministic, indented JSON document.
+
+    The document carries a ``schema_version`` integer so consumers can detect
+    incompatible shape changes; existing keys stay unchanged across additive
+    revisions.
+
+    :param result: The lint outcome to render.
+    :param statistics: When true, add an additive ``statistics`` object mapping
+        each violated code to ``{"count", "description"}``. The key appears only
+        when requested and leaves every existing key untouched, so
+        ``schema_version`` stays ``1`` (an additive optional key cannot break a
+        consumer that ignores unknown keys); an empty object is emitted when
+        there are no violations.
+    :returns: The rendered JSON document.
+    """
+    payload: dict[str, object] = {
+        "schema_version": JSON_SCHEMA_VERSION,
         "ok": result.ok,
         "files_checked": result.files_checked,
         "violations": [violation.__dict__ for violation in _sorted_violations(result.violations)],
     }
+    if statistics:
+        payload["statistics"] = {
+            code: {"count": count, "description": description} for code, count, description in _statistics_rows(result)
+        }
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
-KNOWN_OUTPUT_FORMATS: tuple[str, ...] = ("text", "json")
-"""Names of the formatters :func:`format_result` can render (04.0 extends this)."""
+def _statistics_rows(result: LintResult) -> list[tuple[str, int, str]]:
+    """Return ``(code, count, description)`` rows for *result*, sorted by code.
 
-_FORMATTERS = {"text": format_text, "json": format_json}
+    Counts are per violated rule code; descriptions come from
+    :attr:`LintResult.registered_rules` (empty string when a code is absent,
+    e.g. a hand-built result). Codes with no violations are not listed.
+    """
+    counts = Counter(violation.code for violation in result.violations)
+    descriptions = dict(result.registered_rules)
+    return [(code, counts[code], descriptions.get(code, "")) for code in sorted(counts)]
+
+
+def _format_statistics_text(result: LintResult) -> str:
+    """Render the per-code count summary block, e.g. ``X001  3  Bare except``.
+
+    Columns are the rule code left-justified to the widest code, the count
+    right-justified to the widest count, and the description, each separated by
+    two spaces. Trailing whitespace (an empty description) is stripped.
+    """
+    rows = _statistics_rows(result)
+    code_width = max(len(code) for code, _, _ in rows)
+    count_width = max(len(str(count)) for _, count, _ in rows)
+    return "\n".join(
+        f"{code:<{code_width}}  {count:>{count_width}}  {description}".rstrip() for code, count, description in rows
+    )
+
+
+JSON_SCHEMA_VERSION = 1
+"""Schema version stamped into :func:`format_json` output (bumped on breaking changes)."""
+
+SARIF_VERSION = "2.1.0"
+"""SARIF specification version emitted by :func:`format_sarif`."""
+
+SARIF_SCHEMA_URI = "https://json.schemastore.org/sarif-2.1.0.json"
+"""``$schema`` URI advertised by :func:`format_sarif` output."""
+
+
+def _escape_github_data(value: str) -> str:
+    """Escape a GitHub workflow-command *message* payload.
+
+    Applies the data-string rules from the GitHub Actions toolkit: ``%`` is
+    escaped first (so subsequently introduced ``%`` sequences are not
+    double-escaped), then carriage return and newline.
+    """
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_github_property(value: str) -> str:
+    """Escape a GitHub workflow-command *property* value.
+
+    Property values carry the data-string escapes plus ``:`` and ``,``, which
+    otherwise terminate a property or the property list.
+    """
+    return _escape_github_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
+def format_github(result: LintResult) -> str:
+    """Render *result* as GitHub Actions ``::error`` workflow commands.
+
+    Emits one annotation per violation, ordered by :func:`_sorted_violations`
+    (plan contract C9). Columns are 1-based (the engine stores a 0-based
+    ``col_offset``). An empty result renders as the empty string, so the CLI
+    prints nothing for a clean run rather than a stray annotation.
+
+    :param result: The lint outcome to render.
+    :returns: Newline-separated workflow commands, or ``""`` when clean.
+    """
+    lines = [
+        f"::error file={_escape_github_property(violation.filename)},"
+        f"line={violation.lineno},col={violation.col_offset + 1},"
+        f"title={_escape_github_property(violation.code)}::"
+        f"{_escape_github_data(violation.message)}"
+        for violation in _sorted_violations(result.violations)
+    ]
+    return "\n".join(lines)
+
+
+def _sarif_uri(filename: str) -> str:
+    """Return *filename* as a forward-slash SARIF ``artifactLocation`` URI.
+
+    :func:`lint_paths` display names are already ``base_dir``-relative POSIX
+    paths (plan contract C6); the backslash replacement only matters for the
+    absolute-path fallback on Windows, keeping the URI portable.
+    """
+    return filename.replace("\\", "/")
+
+
+def format_sarif(result: LintResult) -> str:
+    """Render *result* as a SARIF 2.1.0 document (built with ``json`` only, C8).
+
+    The single run advertises the ``flakeforge`` driver and its package version,
+    lists one ``rules[]`` entry per registered code (from
+    :attr:`LintResult.registered_rules`), and one ``results[]`` entry per
+    violation with a 1-based region. Output is deterministic: results follow the
+    C9 ordering and rules keep the registry's code order, with ``sort_keys``
+    stabilising object-key order.
+
+    :param result: The lint outcome to render.
+    :returns: An indented SARIF 2.1.0 JSON document.
+    """
+    # Imported lazily to avoid an import cycle: the package ``__init__`` imports
+    # this module, so ``__version__`` is not yet bound at api import time.
+    from . import __version__  # noqa: X006
+
+    driver_rules = [
+        {"id": code, "shortDescription": {"text": description}} for code, description in result.registered_rules
+    ]
+    results = [
+        {
+            "ruleId": violation.code,
+            "level": "error",
+            "message": {"text": violation.message},
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": _sarif_uri(violation.filename)},
+                        "region": {
+                            "startLine": violation.lineno,
+                            "startColumn": violation.col_offset + 1,
+                        },
+                    }
+                }
+            ],
+        }
+        for violation in _sorted_violations(result.violations)
+    ]
+    document = {
+        "$schema": SARIF_SCHEMA_URI,
+        "version": SARIF_VERSION,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "flakeforge",
+                        "version": __version__,
+                        "rules": driver_rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    return json.dumps(document, indent=2, sort_keys=True)
+
+
+FORMATTERS: dict[str, Callable[[LintResult], str]] = {
+    "text": format_text,
+    "json": format_json,
+    "github": format_github,
+    "sarif": format_sarif,
+}
+"""Single source of truth mapping each output-format name to its renderer.
+
+The CLI ``--output-format`` choices and :func:`validate_output_format` both read
+this table, so registering a formatter here is enough to expose it everywhere
+(04.0 extends it with CI-native formats).
+"""
+
+KNOWN_OUTPUT_FORMATS: tuple[str, ...] = tuple(FORMATTERS)
+"""Registered output-format names, derived from :data:`FORMATTERS` (kept for API stability)."""
+
+STATISTICS_FORMATS: tuple[str, ...] = ("text", "json")
+"""Formats that render a ``--statistics`` summary; ``github``/``sarif`` ignore it.
+
+:func:`format_result` only threads ``statistics`` into these formatters; the CLI
+consults this table to warn (on stderr) when ``--statistics`` is set for a format
+that drops it. The engine never prints -- surfacing the warning is the CLI's job.
+"""
 
 
 def validate_output_format(output_format: str) -> str:
@@ -285,21 +492,33 @@ def validate_output_format(output_format: str) -> str:
     :raises ValueError: If *output_format* is not a registered formatter; the
         CLI maps this to exit code ``2`` (plan contract C1).
     """
-    if output_format not in _FORMATTERS:
+    if output_format not in FORMATTERS:
         known = ", ".join(KNOWN_OUTPUT_FORMATS)
         raise ValueError(f"Unknown output format {output_format!r}; choose from {known}")
     return output_format
 
 
-def format_result(result: LintResult, output_format: str) -> str:
+def format_result(result: LintResult, output_format: str, *, statistics: bool = False) -> str:
     """Render *result* using the formatter named by *output_format*.
+
+    ``statistics`` is a rendering concern threaded here rather than through the
+    :data:`FORMATTERS` registry signature, which stays ``Callable[[LintResult],
+    str]``. It is applied only for the formats in :data:`STATISTICS_FORMATS`
+    (``text``/``json``); ``github``/``sarif`` silently ignore it (the CLI emits
+    the user-facing warning).
 
     :param result: The lint outcome to render.
     :param output_format: Name of a registered formatter.
+    :param statistics: When true, request a per-code count summary from formats
+        that support one.
     :returns: The rendered report text.
     :raises ValueError: If *output_format* is not a registered formatter.
     """
-    return _FORMATTERS[validate_output_format(output_format)](result)
+    validated = validate_output_format(output_format)
+    formatter = FORMATTERS[validated]
+    if statistics and validated in STATISTICS_FORMATS:
+        return formatter(result, statistics=True)  # type: ignore[call-arg]
+    return formatter(result)
 
 
 def _is_rule_enabled(code: str, config: LintConfig) -> bool:

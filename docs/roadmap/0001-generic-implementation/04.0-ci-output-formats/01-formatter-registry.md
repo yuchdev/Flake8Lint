@@ -1,7 +1,7 @@
 # 01 - Formatter registry
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 ## Requirements
 

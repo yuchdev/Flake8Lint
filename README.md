@@ -149,7 +149,8 @@ unknown key is only a warning.
 | `--noqa` / `--no-noqa`                 | `allow_noqa`                     | bool / `true`                      |
 | `--rule-module`                        | `rule_modules`                   | list[str] / `[]`                   |
 | `--rule-plugins` / `--no-rule-plugins` | `rule_plugins`                   | bool / `true`                      |
-| `--output-format`                      | `output_format`                  | `"text"` / `"json"`, default `"text"` |
+| `--output-format`                      | `output_format`                  | `"text"` / `"json"` / `"github"` / `"sarif"`, default `"text"` |
+| `--statistics` / `--no-statistics`     | `statistics`                     | bool / `false`                     |
 | `--no-config`                          | *(CLI-only, no TOML key)*        | flag; skip discovery, defaults + CLI |
 | *(file-only, no CLI flag)*             | `noqa_allowed`, `noqa_forbidden` | list[str] / `[]`                   |
 
@@ -336,6 +337,87 @@ pytest
 ```
 
 That keeps unit and integration tests running even when lint finds violations.
+
+## CI output formats
+
+`--output-format` accepts `text` (default), `json`, `github`, and `sarif`. The
+last two are meant for CI systems. Exit codes are unchanged (`0` clean, `1`
+violations, `2` invalid config or invocation), so a failing lint still fails the
+job whatever the format.
+
+### GitHub Actions annotations (`github`)
+
+The `github` format prints one `::error` workflow command per violation, so
+findings show up as inline annotations on the pull request:
+
+```yaml
+# .github/workflows/lint.yml
+name: lint
+on: [push, pull_request]
+jobs:
+  flakeforge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install flakeforge
+      - run: flakeforge check . --output-format github
+```
+
+A clean run prints nothing and exits `0`; a run with violations annotates each
+line and exits `1`, failing the job.
+
+### Code scanning with SARIF (`sarif`)
+
+The `sarif` format emits a SARIF 2.1.0 document that GitHub code scanning ingests
+via `github/codeql-action/upload-sarif`. Redirect it to a file and upload it even
+when the lint step fails, so annotations still appear:
+
+```yaml
+# .github/workflows/code-scanning.yml
+name: code-scanning
+on: [push, pull_request]
+jobs:
+  flakeforge-sarif:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install flakeforge
+      - name: Run flakeforge
+        run: flakeforge check . --output-format sarif > flakeforge.sarif
+        continue-on-error: true
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: flakeforge.sarif
+```
+
+The document lists every registered rule under `tool.driver.rules` and reports
+each violation with a `base_dir`-relative `artifactLocation.uri` and a 1-based
+`region`.
+
+### Per-code statistics (`--statistics`)
+
+`--statistics` (TOML key `statistics`, default `false`) appends a per-code count
+summary. In `text` it follows the violation lines as aligned
+`code  count  description` rows (sorted by code); in `json` it adds a
+`statistics` object mapping each violated code to `{"count", "description"}`
+without changing any existing key or the `schema_version`. A clean run has
+nothing to summarise, so `text` omits the block and `json` emits an empty
+object. The `github` and `sarif` formats ignore `--statistics` and print a
+warning on stderr. The flag never changes the exit code.
+
+```bash
+flakeforge check . --statistics                       # text summary after findings
+flakeforge check . --output-format json --statistics  # adds a "statistics" object
+```
 
 ## Renamed from flake8-lint
 

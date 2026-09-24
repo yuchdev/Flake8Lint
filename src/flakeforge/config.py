@@ -32,6 +32,7 @@ class LintConfig:
     :ivar rule_plugins: Whether installed ``flakeforge.rules`` entry-point
         providers are loaded.
     :ivar output_format: Name of the formatter used to render results.
+    :ivar statistics: Whether to append a per-code count summary to the output.
     :ivar base_dir: Directory patterns are resolved against; excluded from equality.
     :ivar config_path: Path the config was loaded from; excluded from equality.
     :ivar legacy_mode: Whether a deprecated config section was used.
@@ -48,6 +49,7 @@ class LintConfig:
     rule_modules: tuple[str, ...] = ()
     rule_plugins: bool = True
     output_format: str = "text"
+    statistics: bool = False
     base_dir: Optional[Path] = field(default=None, compare=False)
     config_path: Optional[Path] = field(default=None, compare=False)
     legacy_mode: bool = field(default=False, compare=False)
@@ -139,6 +141,7 @@ class LintConfig:
         rule_modules: Optional[tuple[str, ...]] = None,
         rule_plugins: Optional[bool] = None,
         output_format: Optional[str] = None,
+        statistics: Optional[bool] = None,
         warnings: Optional[tuple[str, ...]] = None,
     ) -> LintConfig:
         """Return a copy with the supplied (non-``None``) fields overridden.
@@ -160,6 +163,7 @@ class LintConfig:
             rule_modules=self.rule_modules if rule_modules is None else rule_modules,
             rule_plugins=self.rule_plugins if rule_plugins is None else rule_plugins,
             output_format=self.output_format if output_format is None else output_format,
+            statistics=self.statistics if statistics is None else statistics,
             warnings=self.warnings if warnings is None else warnings,
         )
 
@@ -556,4 +560,5 @@ _CONFIG_SCHEMA: dict[str, tuple[Callable[..., Any], Any]] = {
     "rule_modules": (_as_str_tuple, ()),
     "rule_plugins": (_as_bool, True),
     "output_format": (_as_str, "text"),
+    "statistics": (_as_bool, False),
 }

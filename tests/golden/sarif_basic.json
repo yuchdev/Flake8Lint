@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "pkg/alpha.py"
+                },
+                "region": {
+                  "startColumn": 1,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Bare except clause"
+          },
+          "ruleId": "X001"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "pkg/beta.py"
+                },
+                "region": {
+                  "startColumn": 5,
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Broad exception clause"
+          },
+          "ruleId": "X002"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "name": "flakeforge",
+          "rules": [
+            {
+              "id": "X001",
+              "shortDescription": {
+                "text": "Avoid bare except clauses."
+              }
+            },
+            {
+              "id": "X002",
+              "shortDescription": {
+                "text": "Avoid catching broad exceptions."
+              }
+            }
+          ],
+          "version": "9.9.9-golden"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

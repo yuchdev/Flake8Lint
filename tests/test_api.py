@@ -213,3 +213,280 @@ def test_python_m_entry_point_raises_system_exit(monkeypatch) -> None:
     monkeypatch.setattr("flakeforge.cli.main", lambda: 7)
     with pytest.raises(SystemExit, match="7"):
         runpy.run_module("flakeforge.__main__", run_name="__main__")
+
+
+def test_formatters_registry_drives_known_formats_and_choices() -> None:
+    from flakeforge import api
+
+    assert api.KNOWN_OUTPUT_FORMATS == tuple(api.FORMATTERS)
+    assert set(api.FORMATTERS) == {"text", "json", "github", "sarif"}
+
+
+def test_validate_output_format_reads_registry() -> None:
+    from flakeforge import api
+
+    assert api.validate_output_format("json") == "json"
+    with pytest.raises(ValueError, match="Unknown output format"):
+        api.validate_output_format("xml")
+
+
+def test_validate_output_format_accepts_dynamically_registered_formatter(monkeypatch) -> None:
+    from flakeforge import api
+
+    monkeypatch.setitem(api.FORMATTERS, "csv", lambda result: "csv")
+    assert api.validate_output_format("csv") == "csv"
+    assert api.format_result(LintResult(violations=(), files_checked=0), "csv") == "csv"
+
+
+def test_format_json_carries_schema_version_without_changing_existing_keys() -> None:
+    import json
+
+    from flakeforge import api
+
+    result = LintResult(
+        violations=(RuleViolation("m.py", 1, 0, "X002", "broad except"),),
+        files_checked=1,
+    )
+    payload = json.loads(api.format_json(result))
+    assert payload["schema_version"] == api.JSON_SCHEMA_VERSION == 1
+    assert payload["ok"] is False
+    assert payload["files_checked"] == 1
+    assert payload["violations"] == [
+        {
+            "filename": "m.py",
+            "lineno": 1,
+            "col_offset": 0,
+            "code": "X002",
+            "message": "broad except",
+        }
+    ]
+
+
+_GOLDEN_DIR = Path(__file__).parent / "golden"
+
+
+def test_format_github_emits_one_annotation_per_violation_with_1based_cols() -> None:
+    from flakeforge import api
+
+    result = LintResult(
+        violations=(
+            RuleViolation("pkg/beta.py", 12, 4, "X002", "Broad exception clause"),
+            RuleViolation("pkg/alpha.py", 3, 0, "X001", "Bare except clause"),
+        ),
+        files_checked=2,
+    )
+    lines = api.format_github(result).splitlines()
+    # C9 ordering: alpha before beta; col_offset 0/4 -> 1-based col 1/5.
+    assert lines == [
+        "::error file=pkg/alpha.py,line=3,col=1,title=X001::Bare except clause",
+        "::error file=pkg/beta.py,line=12,col=5,title=X002::Broad exception clause",
+    ]
+
+
+def test_format_github_empty_result_is_empty_string() -> None:
+    from flakeforge import api
+
+    assert api.format_github(LintResult(violations=(), files_checked=0)) == ""
+
+
+def test_format_github_escapes_message_and_property_values() -> None:
+    from flakeforge import api
+
+    # A message carries the data escapes (%, CR, LF); a filename/title carries
+    # those plus ':' and ',' which otherwise terminate a property.
+    result = LintResult(
+        violations=(
+            RuleViolation(
+                "weird,name:1%.py",
+                7,
+                0,
+                "X001",
+                "bad 100% here\r\nsecond, line: end",
+            ),
+        ),
+        files_checked=1,
+    )
+    line = api.format_github(result)
+    assert line == (
+        "::error file=weird%2Cname%3A1%25.py,line=7,col=1,title=X001::bad 100%25 here%0D%0Asecond, line: end"
+    )
+    # Property escaping is stricter than data escaping: ':'/',' survive raw in
+    # the message but are percent-encoded in the file property.
+    assert "%2C" in line and "%3A" in line  # file property
+    assert "second, line: end" in line  # message keeps ':' and ','
+
+
+def test_format_sarif_matches_golden_structure(monkeypatch) -> None:
+    import flakeforge
+    from flakeforge import api
+
+    monkeypatch.setattr(flakeforge, "__version__", "9.9.9-golden")
+    result = LintResult(
+        violations=(
+            RuleViolation("pkg/beta.py", 12, 4, "X002", "Broad exception clause"),
+            RuleViolation("pkg/alpha.py", 3, 0, "X001", "Bare except clause"),
+        ),
+        files_checked=2,
+        registered_rules=(
+            ("X001", "Avoid bare except clauses."),
+            ("X002", "Avoid catching broad exceptions."),
+        ),
+    )
+    produced = api.format_sarif(result)
+    golden = (_GOLDEN_DIR / "sarif_basic.json").read_text(encoding="utf-8")
+    assert produced + "\n" == golden
+
+
+def test_format_sarif_structure_cols_and_escaping() -> None:
+    import json
+
+    from flakeforge import api
+
+    result = LintResult(
+        violations=(RuleViolation("pkg/mod.py", 5, 2, "X001", "100% broken: yes, really"),),
+        files_checked=1,
+        registered_rules=(("X001", "Avoid bare except clauses."),),
+    )
+    doc = json.loads(api.format_sarif(result))
+    assert doc["version"] == "2.1.0"
+    assert doc["$schema"] == api.SARIF_SCHEMA_URI
+    driver = doc["runs"][0]["tool"]["driver"]
+    assert driver["name"] == "flakeforge"
+    assert driver["version"]  # package version, non-empty
+    assert driver["rules"] == [{"id": "X001", "shortDescription": {"text": "Avoid bare except clauses."}}]
+    (single,) = doc["runs"][0]["results"]
+    assert single["ruleId"] == "X001"
+    assert single["level"] == "error"
+    # JSON carries characters literally: no workflow-command escaping here.
+    assert single["message"]["text"] == "100% broken: yes, really"
+    region = single["locations"][0]["physicalLocation"]["region"]
+    # 0-based col_offset 2 -> 1-based startColumn 3; lineno is already 1-based.
+    assert region["startLine"] == 5
+    assert region["startColumn"] == 3
+    assert single["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "pkg/mod.py"
+
+
+def test_format_sarif_empty_result_is_valid_document() -> None:
+    import json
+
+    from flakeforge import api
+
+    doc = json.loads(api.format_sarif(LintResult(violations=(), files_checked=0)))
+    assert doc["version"] == "2.1.0"
+    assert doc["runs"][0]["results"] == []
+    assert doc["runs"][0]["tool"]["driver"]["rules"] == []
+
+
+def test_lint_paths_populates_registered_rules(tmp_path, monkeypatch) -> None:
+    pkg = tmp_path / "src"
+    pkg.mkdir()
+    (pkg / "m.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = lint_paths([pkg])
+    codes = [code for code, _ in result.registered_rules]
+    # Built-in X-codes are exposed so SARIF can list every known rule.
+    assert "X001" in codes
+    assert codes == sorted(codes)
+    assert all(description for _, description in result.registered_rules)
+
+
+def _stats_result() -> LintResult:
+    """A multi-code result with registry descriptions for statistics tests."""
+    return LintResult(
+        violations=(
+            RuleViolation("pkg/beta.py", 12, 4, "X002", "Broad exception clause"),
+            RuleViolation("pkg/alpha.py", 3, 0, "X001", "Bare except clause"),
+            RuleViolation("pkg/gamma.py", 9, 0, "X001", "Bare except clause"),
+        ),
+        files_checked=3,
+        registered_rules=(
+            ("X001", "Avoid bare except clauses."),
+            ("X002", "Avoid catching broad exceptions."),
+        ),
+    )
+
+
+def test_format_text_statistics_appends_aligned_sorted_summary() -> None:
+    from flakeforge import api
+
+    output = api.format_text(_stats_result(), statistics=True)
+    body, _blank, summary = output.partition("\n\n")
+    # The normal violation lines come first, unchanged.
+    assert body.splitlines()[0].startswith("pkg/alpha.py:3:0: X001")
+    # Summary sorted by code; count column right-justified; description from registry.
+    assert summary.splitlines() == [
+        "X001  2  Avoid bare except clauses.",
+        "X002  1  Avoid catching broad exceptions.",
+    ]
+
+
+def test_format_text_without_statistics_has_no_summary() -> None:
+    from flakeforge import api
+
+    assert "\n\n" not in api.format_text(_stats_result())
+
+
+def test_format_text_statistics_zero_violations_omits_summary() -> None:
+    from flakeforge import api
+
+    output = api.format_text(LintResult(violations=(), files_checked=2), statistics=True)
+    assert output == "Checked 2 file(s); no violations found."
+
+
+def test_format_text_statistics_missing_description_is_blank() -> None:
+    from flakeforge import api
+
+    # A hand-built result with no registered_rules: description falls back to "".
+    result = LintResult(
+        violations=(RuleViolation("m.py", 1, 0, "X001", "bare except"),),
+        files_checked=1,
+    )
+    summary = api.format_text(result, statistics=True).partition("\n\n")[2]
+    assert summary == "X001  1"
+
+
+def test_format_json_statistics_object_is_additive() -> None:
+    import json
+
+    from flakeforge import api
+
+    payload = json.loads(api.format_json(_stats_result(), statistics=True))
+    # Existing keys and schema_version are unchanged by the additive key.
+    assert payload["schema_version"] == 1
+    assert payload["ok"] is False
+    assert payload["files_checked"] == 3
+    assert payload["statistics"] == {
+        "X001": {"count": 2, "description": "Avoid bare except clauses."},
+        "X002": {"count": 1, "description": "Avoid catching broad exceptions."},
+    }
+
+
+def test_format_json_without_statistics_has_no_statistics_key() -> None:
+    import json
+
+    from flakeforge import api
+
+    payload = json.loads(api.format_json(_stats_result()))
+    assert "statistics" not in payload
+
+
+def test_format_json_statistics_zero_violations_is_empty_object() -> None:
+    import json
+
+    from flakeforge import api
+
+    payload = json.loads(api.format_json(LintResult(violations=(), files_checked=0), statistics=True))
+    assert payload["statistics"] == {}
+
+
+def test_format_result_threads_statistics_only_for_text_and_json() -> None:
+    from flakeforge import api
+
+    result = _stats_result()
+    assert "X001  2" in api.format_result(result, "text", statistics=True)
+    assert '"statistics"' in api.format_result(result, "json", statistics=True)
+    # github/sarif ignore statistics: identical output with or without the flag.
+    for fmt in ("github", "sarif"):
+        assert api.format_result(result, fmt, statistics=True) == api.format_result(result, fmt)
+    assert api.STATISTICS_FORMATS == ("text", "json")

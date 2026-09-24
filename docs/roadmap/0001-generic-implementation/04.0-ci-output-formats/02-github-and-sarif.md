@@ -1,7 +1,7 @@
 # 02 - `github` and `sarif` formats
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [01-formatter-registry.md](01-formatter-registry.md)
 
 ## Requirements

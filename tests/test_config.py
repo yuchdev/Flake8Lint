@@ -252,6 +252,28 @@ def test_merge_overrides_output_format_and_rule_plugins_in_both_directions() -> 
     assert overridden.rule_plugins is True
 
 
+def test_config_statistics_defaults_false() -> None:
+    assert LintConfig.from_mapping({}).statistics is False
+
+
+def test_config_parses_statistics_from_file(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text("statistics = true\n", encoding="utf-8")
+    assert load_config(cwd=tmp_path).statistics is True
+
+
+def test_config_rejects_non_boolean_statistics() -> None:
+    with pytest.raises(ConfigValidationError, match="statistics"):
+        LintConfig.from_mapping({"statistics": "yes"})
+
+
+def test_merge_overrides_statistics_in_both_directions() -> None:
+    file_config = LintConfig(statistics=True)
+    # None leaves the file value intact; explicit values override either way.
+    assert file_config.merge(statistics=None) == file_config
+    assert file_config.merge(statistics=False).statistics is False
+    assert LintConfig(statistics=False).merge(statistics=True).statistics is True
+
+
 def test_flakeforge_toml_unknown_key_raises_with_did_you_mean(tmp_path) -> None:
     (tmp_path / "flakeforge.toml").write_text('exlude = ["build"]\n', encoding="utf-8")
     with pytest.raises(ConfigValidationError) as excinfo:
