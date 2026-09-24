@@ -1,7 +1,7 @@
 # 03 - Config-relative path semantics
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [01-unified-strict-schema.md](01-unified-strict-schema.md)
 
 ## Requirements

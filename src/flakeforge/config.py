@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import difflib
 import os
 import tomllib
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Optional, Union
 
 LEGACY_SECTION_WARNING = "[tool.flake8_lint] is deprecated; rename it to [tool.flakeforge]."
@@ -61,35 +62,56 @@ class LintConfig:
         config_path: Optional[Path] = None,
         legacy_mode: bool = False,
         warnings: Iterable[str] = (),
+        source: Optional[str] = None,
     ) -> LintConfig:
         """Build a :class:`LintConfig` from a parsed TOML mapping.
+
+        Both config surfaces (``flakeforge.toml`` and ``[tool.flakeforge]``) run
+        through this one method, which is driven by :data:`_CONFIG_SCHEMA` (plan
+        contract C5). Unknown keys raise :class:`ConfigValidationError` with a
+        ``difflib`` did-you-mean hint, except in *legacy_mode* where they are
+        appended to ``warnings`` instead. Type errors carry the same *source*
+        prefix. This method never prints; the CLI surfaces warnings.
 
         :param data: Raw config table, or ``None`` for an empty configuration.
         :param base_dir: Directory patterns are resolved against.
         :param config_path: Path the config originated from.
         :param legacy_mode: Whether the data came from a deprecated section.
         :param warnings: Pre-existing warnings to carry forward.
+        :param source: Human-readable label for the config file/section, used to
+            prefix validation errors (e.g. ``flakeforge.toml`` or
+            ``pyproject.toml [tool.flakeforge]``); ``None`` yields no prefix.
         :returns: A validated, immutable configuration instance.
+        :raises ConfigValidationError: On an unknown key (outside legacy mode) or
+            a value of the wrong type.
         """
         payload = data or {}
+        prefix = f"{source}: " if source else ""
+        accumulated = list(warnings)
+
+        for key in payload:
+            if key in _CONFIG_SCHEMA:
+                continue
+            if legacy_mode:
+                accumulated.append(f"{prefix}unknown key {key!r}")
+                continue
+            match = difflib.get_close_matches(key, list(_CONFIG_SCHEMA), n=1)
+            hint = f" (did you mean {match[0]!r}?)" if match else ""
+            raise ConfigValidationError(f"{prefix}unknown key {key!r}{hint}")
+
+        values: dict[str, Any] = {}
+        for key, (coerce, default) in _CONFIG_SCHEMA.items():
+            try:
+                values[key] = coerce(payload.get(key, default), field_name=key)
+            except ConfigValidationError as exc:
+                raise ConfigValidationError(f"{prefix}{exc}") from exc
+
         return cls(
-            include=_as_str_tuple(payload.get("include"), field_name="include"),
-            exclude=_as_str_tuple(payload.get("exclude"), field_name="exclude"),
-            select=_as_upper_tuple(payload.get("select"), field_name="select"),
-            ignore=_as_upper_tuple(payload.get("ignore"), field_name="ignore"),
-            allow_noqa=_as_bool(payload.get("allow_noqa", True), field_name="allow_noqa"),
-            noqa_allowed=_as_str_tuple(payload.get("noqa_allowed"), field_name="noqa_allowed"),
-            noqa_forbidden=_as_str_tuple(
-                payload.get("noqa_forbidden"),
-                field_name="noqa_forbidden",
-            ),
-            rule_modules=_as_str_tuple(payload.get("rule_modules"), field_name="rule_modules"),
-            rule_plugins=_as_bool(payload.get("rule_plugins", True), field_name="rule_plugins"),
-            output_format=_as_str(payload.get("output_format", "text"), field_name="output_format"),
+            **values,
             base_dir=base_dir,
             config_path=config_path,
             legacy_mode=legacy_mode,
-            warnings=tuple(warnings),
+            warnings=tuple(accumulated),
         )
 
     @property
@@ -229,7 +251,12 @@ def load_config(
     for directory in _iter_candidate_directories(base):
         explicit = directory / "flakeforge.toml"
         if explicit.is_file():
-            return _load_path(explicit)
+            config = _load_path(explicit)
+            shadowed = _detect_pyproject_section(directory / "pyproject.toml")
+            if shadowed is not None:
+                warning = f"pyproject.toml {shadowed} is shadowed by flakeforge.toml; remove one"
+                config = config.merge(warnings=config.warnings + (warning,))
+            return config
 
         pyproject = directory / "pyproject.toml"
         if pyproject.is_file():
@@ -238,6 +265,42 @@ def load_config(
                 return loaded
 
     return LintConfig(base_dir=base)
+
+
+def _detect_pyproject_section(pyproject: Path) -> Optional[str]:
+    """Report which ``flakeforge`` section a sibling ``pyproject.toml`` defines.
+
+    Used only by the same-directory shadow check in :func:`load_config`: when a
+    ``flakeforge.toml`` wins over a ``pyproject.toml`` in the same directory
+    (plan contract C3), this names the ``pyproject.toml`` section being shadowed
+    so the caller can warn about it. It merely *detects* section presence and
+    never validates the shadowed body, so an unknown key or wrong-typed value in
+    a section that will not be loaded cannot be turned into an error. A file that
+    is missing or cannot be parsed simply yields ``None``.
+
+    :param pyproject: Candidate ``pyproject.toml`` path in the same directory as
+        the winning ``flakeforge.toml``.
+    :returns: ``"[tool.flakeforge]"`` or the legacy ``"[tool.flake8_lint]"`` when
+        that section is present (mirroring the precedence of
+        :func:`_load_pyproject`), else ``None``.
+    """
+    if not pyproject.is_file():
+        return None
+    try:
+        payload = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        # A sibling we cannot even parse is not a config that would ever be
+        # loaded, so no shadow can be attributed to it; the winning
+        # flakeforge.toml stands and detection reports no section.
+        payload = {}
+    tool_section = payload.get("tool")
+    if not isinstance(tool_section, dict):
+        return None
+    if "flakeforge" in tool_section:
+        return "[tool.flakeforge]"
+    if "flake8_lint" in tool_section:
+        return "[tool.flake8_lint]"
+    return None
 
 
 def _load_path(path: Path) -> LintConfig:
@@ -250,11 +313,41 @@ def _load_path(path: Path) -> LintConfig:
         return loaded
     if not isinstance(data, dict):
         raise ConfigValidationError(f"{path} must contain a top-level TOML table")
+    section, source = _standalone_section(data, path)
     return LintConfig.from_mapping(
-        data,
+        section,
         base_dir=path.parent.resolve(),
         config_path=path.resolve(),
+        source=source,
     )
+
+
+def _standalone_section(data: dict[str, Any], path: Path) -> tuple[dict[str, Any], str]:
+    """Resolve a standalone ``flakeforge.toml`` body to its option table.
+
+    Accepts either flat top-level keys or a single ``[tool.flakeforge]`` wrapper
+    table, so a snippet can be copied between ``flakeforge.toml`` and
+    ``pyproject.toml``. Mixing both forms in one file is rejected.
+
+    :param data: The parsed top-level TOML table.
+    :param path: The file the table came from (used only for its display name).
+    :returns: A ``(section, source_label)`` pair for :meth:`LintConfig.from_mapping`.
+    :raises ConfigValidationError: If the wrapper table is malformed, or if both
+        flat keys and the wrapper table are present.
+    """
+    tool = data.get("tool")
+    wrapper: Optional[dict[str, Any]] = None
+    if isinstance(tool, dict) and "flakeforge" in tool:
+        wrapper = tool["flakeforge"]
+        if not isinstance(wrapper, dict):
+            raise ConfigValidationError(f"{path.name}: [tool.flakeforge] must be a table")
+    if wrapper is None:
+        return data, path.name
+    if any(key != "tool" for key in data):
+        raise ConfigValidationError(
+            f"{path.name}: set options either as top-level keys or under [tool.flakeforge], not both"
+        )
+    return wrapper, f"{path.name} [tool.flakeforge]"
 
 
 def validate_config(config: LintConfig, known_codes: Sequence[str]) -> LintConfig:
@@ -304,6 +397,7 @@ def _load_pyproject(path: Path, *, data: Optional[dict[str, Any]] = None) -> Opt
             section,
             base_dir=path.parent.resolve(),
             config_path=path.resolve(),
+            source=f"{path.name} [tool.flakeforge]",
         )
 
     if "flake8_lint" in tool_section:
@@ -316,6 +410,7 @@ def _load_pyproject(path: Path, *, data: Optional[dict[str, Any]] = None) -> Opt
             config_path=path.resolve(),
             legacy_mode=True,
             warnings=(LEGACY_SECTION_WARNING,),
+            source=f"{path.name} [tool.flake8_lint]",
         )
 
     return None
@@ -386,6 +481,46 @@ def _as_upper_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
     return tuple(item.upper() for item in _as_str_tuple(value, field_name=field_name))
 
 
+def _as_path_pattern_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
+    """Coerce a TOML array of relative path patterns, rejecting absolute ones.
+
+    The path-pattern config keys (``include``, ``exclude``, ``noqa_allowed``,
+    ``noqa_forbidden``) resolve against the config file's directory
+    (``base_dir``, plan contract C6), so an absolute pattern -- a POSIX
+    ``/etc`` or a Windows drive/UNC path -- would silently escape that anchor.
+    Rejecting it here (one place, both config surfaces, including the lenient
+    legacy ``[tool.flake8_lint]`` section, since this is a value error rather
+    than an unknown key) also guarantees :func:`api._safe_traversal_root` never
+    receives an absolute config pattern. Relative patterns, including ones with
+    ``..`` segments (e.g. ``../src``), remain supported.
+
+    :param value: The raw TOML value for *field_name*.
+    :param field_name: The config key, used in error messages.
+    :returns: The validated tuple of relative path patterns.
+    :raises ConfigValidationError: If *value* is not an array of strings, or any
+        entry is an absolute path.
+    """
+    patterns = _as_str_tuple(value, field_name=field_name)
+    for pattern in patterns:
+        if _is_absolute_pattern(pattern):
+            raise ConfigValidationError(
+                f"{field_name} pattern {pattern!r} must be relative to the config file directory, not absolute"
+            )
+    return patterns
+
+
+def _is_absolute_pattern(pattern: str) -> bool:
+    """Return whether *pattern* is anchored outside the config file directory.
+
+    Both flavours are checked so a config authored on either platform is
+    rejected regardless of the host running the linter: any Windows anchor
+    (drive-rooted ``C:\\...``, drive-relative ``C:foo``, root-relative ``\\foo``,
+    UNC ``\\\\host\\share``) and ``/``-rooted POSIX paths all count. ``~`` is a
+    literal segment because patterns are never user-expanded.
+    """
+    return bool(PureWindowsPath(pattern).anchor) or PurePosixPath(pattern).is_absolute()
+
+
 def _normalize_codes(values: tuple[str, ...]) -> tuple[str, ...]:
     """Upper-case each rule code in *values*."""
     return tuple(value.upper() for value in values)
@@ -403,3 +538,22 @@ def _as_str(value: Any, *, field_name: str) -> str:
     if isinstance(value, str):
         return value
     raise ConfigValidationError(f"{field_name} must be a string")
+
+
+#: The single source of truth for the config surface (plan contract C5): each
+#: key maps to ``(coercer, default)``. :meth:`LintConfig.from_mapping` iterates
+#: this mapping, so both ``flakeforge.toml`` and ``[tool.flakeforge]`` accept the
+#: same keys, and adding a future setting is a one-line entry here. The keys must
+#: match the coerced ``LintConfig`` field names exactly.
+_CONFIG_SCHEMA: dict[str, tuple[Callable[..., Any], Any]] = {
+    "include": (_as_path_pattern_tuple, ()),
+    "exclude": (_as_path_pattern_tuple, ()),
+    "select": (_as_upper_tuple, ()),
+    "ignore": (_as_upper_tuple, ()),
+    "allow_noqa": (_as_bool, True),
+    "noqa_allowed": (_as_path_pattern_tuple, ()),
+    "noqa_forbidden": (_as_path_pattern_tuple, ()),
+    "rule_modules": (_as_str_tuple, ()),
+    "rule_plugins": (_as_bool, True),
+    "output_format": (_as_str, "text"),
+}

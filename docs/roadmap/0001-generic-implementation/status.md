@@ -7,7 +7,7 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 | Task | Name                             | Status         | Tests |
 |------|----------------------------------|----------------|-------|
 | 01.0 | Standalone CLI Mode              | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, `test_docs_smoke.py`, CI `wheel-smoke` |
-| 02.0 | Tool-Mode Config Surfaces        | ⬜ Not started | -     |
+| 02.0 | Tool-Mode Config Surfaces        | ✅ Complete    | `test_config.py`, `test_config_precedence.py`, `test_cli.py`, `test_api.py`, `test_discovery.py`, `test_noqa.py`, CI `wheel-smoke` |
 | 03.0 | Config Introspection & Bootstrap | ⬜ Not started | -     |
 | 04.0 | CI Output Formats                | ⬜ Not started | -     |
 | 05.0 | Incremental Adoption             | ⬜ Not started | -     |
@@ -37,6 +37,11 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   (`api._safe_traversal_root`, security LOW, CWE-22) moves to **02.0/03** by user ruling. A
   config-relative `../src` include is a supported, tested use case, so the confinement rule must
   be designed together with C6. Plain `is_relative_to(base_dir)` would break it.
+
+- 2026-09-24 - 02.0/03 confinement ruling (user): an **absolute** path pattern in a config file
+  exits `2` with an error naming the pattern. Relative patterns, including `..` (e.g.
+  `include = ["../src"]` from `project/config/`), stay allowed. This closes the CWE-22 LOW
+  finding from the 01.0 review.
 
 ## Task details
 
@@ -69,3 +74,35 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 - Accepted LOW follow-ups: a scanned repo's own config can silence findings (use `--no-config`
   for gating); `api._safe_traversal_root` doesn't confine `..`/absolute include patterns
   (pre-existing, API-only); `sys.modules` residue (revisit in 06.0/01).
+
+### Task 02.0 - Tool-Mode Config Surfaces (✅ 2026-09-24)
+
+**Delivered**
+
+- 01: one strict schema (`_CONFIG_SCHEMA`) drives `LintConfig.from_mapping()` for both surfaces
+  (C5). An unknown key exits `2` with a file/section prefix and a did-you-mean hint (fixes G5).
+  Legacy `[tool.flake8_lint]` stays lenient for unknown keys. `flakeforge.toml` may be flat or
+  wrapped as `[tool.flakeforge]`, but not both at once.
+- 02: same-directory `flakeforge.toml` beats a sibling `pyproject.toml` section and adds exactly
+  one shadow warning (discovery only, not for `--config`). The nearest directory wins, and a
+  `pyproject.toml` without a flakeforge section doesn't stop the upward search (fixes G6).
+- 03: config path patterns resolve against the config file's directory, and display names are
+  relative to `base_dir` regardless of cwd (fixes G7). Any anchored pattern in a config file
+  (POSIX `/`, Windows drive or drive-relative, UNC, root-relative) exits `2`. Relative `..`
+  patterns stay supported. This closes the CWE-22 LOW finding from 01.0.
+- 04: `tests/test_config_precedence.py`, a 24-cell matrix plus one extra test. Seven precedence
+  scenarios added to `wheel-smoke`. The README now has a single "Configuration" section (key
+  table, C2/C3/C6, when to pick which file), and `docs/architecture.md` is updated.
+
+**Tests / gate**
+
+- 203 → 267 tests, all passing. Coverage 92.75%. `ruff` is clean (venv and `uv run`), and the
+  self-check subset is clean. The extended `wheel-smoke` script passed locally. `/link-check` is
+  clean.
+- `/verify-subtask` PASS on 01-04. `/pr-review`: feature-reviewer LGTM, security-auditor
+  PASS_WITH_FOLLOWUP with no CRITICAL finding, so the task is APPROVED. The one actionable LOW
+  (drive-relative `C:foo` wasn't caught) was fixed before close.
+- Accepted LOW/INFO: `..` patterns can still reach outside `base_dir` (by design, read-only AST
+  lint); no size limit when parsing the sibling `pyproject.toml` (same as a normal config load).
+  UX idea for later: a clearer error for a `flakeforge.toml` holding an unrelated `[tool.*]`
+  table.

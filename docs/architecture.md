@@ -33,7 +33,18 @@ That shared registration path matters because extension behavior should exercise
   upward from — the lint target, not the process working directory (contract C4). No
   path arguments resolve to the current directory, one path to that directory (a file
   counts as its parent), and several paths to their deepest common ancestor.
-- discovery precedence for `--config`, `flakeforge.toml`, canonical `pyproject.toml`, legacy `pyproject.toml`, and defaults
+- discovery precedence for `--config`, `flakeforge.toml`, canonical `pyproject.toml`, legacy
+  `pyproject.toml`, and defaults (contract C3). Nearest directory wins; a `pyproject.toml`
+  with no recognised section does not stop the upward search. When a `flakeforge.toml` and a
+  `pyproject.toml` section share a directory, `flakeforge.toml` wins and one shadow warning
+  names the shadowed section — but only during discovery, never for an explicit `--config`.
+- one strict schema (`_CONFIG_SCHEMA`) shared by `flakeforge.toml` (flat or `[tool.flakeforge]`
+  wrapped) and `pyproject.toml [tool.flakeforge]` (contract C5): unknown keys are an error
+  (exit `2`) with a did-you-mean hint; the legacy `[tool.flake8_lint]` section stays lenient,
+  turning an unknown key into a warning
+- config-relative path patterns (contract C6): `include`/`exclude`/`noqa_allowed`/
+  `noqa_forbidden` resolve against the config file's directory; absolute patterns are rejected
+  (exit `2`), relative `..` patterns are allowed, and display names are base-relative
 - `--no-config` isolated mode (`isolated_config()`): defaults plus CLI flags only, with
   path patterns resolved against the anchor and no project-local `rule_modules` loaded
 - legacy migration metadata and warnings

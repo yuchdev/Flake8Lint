@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Config path patterns must be relative.** An absolute pattern in a config
+  file's `include`, `exclude`, `noqa_allowed`, or `noqa_forbidden` (a POSIX
+  `/etc` or a Windows drive/UNC path) is now a config error (CLI exit `2`) naming
+  the file/section, the key, and the offending pattern — it would otherwise
+  silently escape the config's own directory. This applies to both config
+  surfaces and to the lenient legacy `[tool.flake8_lint]` section, since it is a
+  value error rather than an unknown key. Relative patterns, including `..`
+  segments such as `include = ["../src"]`, stay supported. CLI `--include` /
+  `--exclude` values are operator input and may still be absolute.
+- **Displayed file paths are now base-relative.** Violation display names are
+  relative to the config file's directory (`base_dir`) whenever the file sits
+  under it, whatever the current working directory — so a `--config` run prints
+  identical, base-relative paths (e.g. `pkg/m.py:3:0: ...`) from any cwd instead
+  of leaking a longer ancestor-relative or absolute path.
+- **Unknown config keys are now an error.** `flakeforge.toml` and
+  `pyproject.toml [tool.flakeforge]` share one strict schema: an unrecognised key
+  raises a config error (CLI exit `2`) naming the file/section, the key, and a
+  did-you-mean hint (e.g. `flakeforge.toml: unknown key 'exlude' (did you mean
+  'exclude'?)`); value type errors carry the same prefix. `flakeforge.toml` may
+  also be written as a `[tool.flakeforge]` wrapper table (but not mixed with flat
+  keys). The deprecated `[tool.flake8_lint]` section stays lenient — an unknown key
+  there is only a warning. Configs valid before this change load unchanged.
 - **Renamed the project from `flake8-lint` to `flakeforge`** (package, CLI command, canonical
   config section, custom-rule entry-point group). The name was easy to mistake for `flake8`
   itself rather than an extension of it; renaming now, before wider adoption, keeps the cost

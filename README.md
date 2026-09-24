@@ -92,7 +92,53 @@ Pass the file explicitly with `--config`, which wins over discovery:
 flakeforge check --config ci.toml src
 ```
 
-### CLI ↔ TOML parameter map
+The full key/flag reference lives in [Configuration](#configuration).
+
+## Configuration
+
+`flakeforge` reads its settings from a single config file. Both surfaces —
+`pyproject.toml [tool.flakeforge]` and a standalone `flakeforge.toml` — share
+**one schema** (contract C5): the same keys, parsed by the same code, so a
+snippet can be copied verbatim between them. A `flakeforge.toml` may use either
+flat top-level keys or a single `[tool.flakeforge]` wrapper table (not both).
+
+```toml
+# pyproject.toml
+[tool.flakeforge]
+include = []
+exclude = []
+select = []
+ignore = []
+allow_noqa = true
+noqa_allowed = []
+noqa_forbidden = []
+rule_modules = []
+rule_plugins = true
+output_format = "text"
+```
+
+```toml
+# flakeforge.toml (same keys, no [tool.flakeforge] header needed)
+include = []
+exclude = []
+select = []
+ignore = []
+allow_noqa = true
+noqa_allowed = []
+noqa_forbidden = []
+rule_modules = []
+rule_plugins = true
+output_format = "text"
+```
+
+`include` is a whitelist. `exclude` is a blacklist and wins. `select` is a
+whitelist. `ignore` is a blacklist and wins. `noqa_allowed` and `noqa_forbidden`
+are path filters for files allowed to use `# noqa`; `noqa_forbidden` wins.
+Unknown keys are a config error (exit code `2`) with a "did you mean" hint;
+the deprecated `[tool.flake8_lint]` section is the one exception, where an
+unknown key is only a warning.
+
+### Key reference
 
 | CLI                                    | TOML key                         | Type / default                     |
 |----------------------------------------|----------------------------------|------------------------------------|
@@ -113,58 +159,62 @@ flag and can be set only in a config file. Boolean flags use
 `--rule-plugins`/`--no-rule-plugins` can override a file's value in either
 direction. An unknown `output_format` is a config error (exit code `2`).
 
-`--include`/`--exclude` are repeatable and comma-splittable (like `--select`)
-and **replace** the config file's lists rather than extend them. `--no-config`
-skips discovery entirely: only built-in defaults and CLI flags apply, path
-patterns resolve against the discovery anchor, and no project-local
-`rule_modules` load (installed entry-point providers still follow
-`--rule-plugins`; `--rule-module` stays an explicit opt-in). Passing both
-`--config` and `--no-config` is rejected with exit code `2`.
+### Value precedence (C2)
 
-## `pyproject.toml` configuration
+For every setting: an **explicit CLI flag > the selected config file > the
+built-in default**. The list flags `--select`, `--ignore`, `--include`, and
+`--exclude` **replace** the file's value; `--rule-module` **appends** to it.
+`--include`/`--exclude` are repeatable and comma-splittable (like `--select`).
 
-```toml
-[tool.flakeforge]
-include = []
-exclude = []
-select = []
-ignore = []
-allow_noqa = true
-noqa_allowed = []
-noqa_forbidden = []
-rule_modules = []
-rule_plugins = true
-output_format = "text"
-```
+### Config-file selection (C3)
 
-Legacy `[tool.flake8_lint]` is still accepted as a migration fallback when the canonical section
-is absent — the same way `[tool.flake8_lint_tests]` was accepted as a fallback for
-`[tool.flake8_lint]` before this rename (that older fallback is now retired). The CLI warns:
+`--config PATH` > `--no-config` (defaults only) > discovery. Discovery walks
+upward from the *discovery anchor* — the lint target, not the process cwd
+(C4) — and in each directory picks, nearest first: `flakeforge.toml` >
+`pyproject.toml [tool.flakeforge]` > `pyproject.toml [tool.flake8_lint]`
+(deprecated). The first directory with a match wins, and a `pyproject.toml`
+without any recognised section does **not** stop the upward search.
+
+If `flakeforge.toml` and a `pyproject.toml` section sit in the **same
+directory**, `flakeforge.toml` wins and a single warning names the shadowed
+section. That shadow warning is discovery-only: pointing `--config` straight at
+`flakeforge.toml` selects it silently. Passing both `--config` and `--no-config`
+is rejected with exit code `2`.
+
+`--no-config` skips discovery entirely: only built-in defaults and CLI flags
+apply, and no project-local `rule_modules` load (installed entry-point providers
+still follow `--rule-plugins`; `--rule-module` stays an explicit opt-in).
+
+Legacy `[tool.flake8_lint]` is still accepted as a migration fallback when the
+canonical section is absent — the same way `[tool.flake8_lint_tests]` was
+accepted as a fallback for `[tool.flake8_lint]` before this rename (that older
+fallback is now retired). The CLI warns:
 
 ```text
 [tool.flake8_lint] is deprecated; rename it to [tool.flakeforge].
 ```
 
-## `flakeforge.toml` configuration
+### Path patterns (C6)
 
-```toml
-include = []
-exclude = []
-select = []
-ignore = []
-allow_noqa = true
-noqa_allowed = []
-noqa_forbidden = []
-rule_modules = []
-rule_plugins = true
-output_format = "text"
-```
+The path-pattern keys — `include`, `exclude`, `noqa_allowed`, `noqa_forbidden` —
+resolve against the **directory of the config file** they appear in, not the
+current working directory. With `--no-config` they resolve against the discovery
+anchor. Absolute patterns are **rejected** with exit code `2`; relative
+patterns, including ones that climb out with `..` (e.g. `../src`), are accepted.
+Display names in output are shown relative to that base directory when a file
+sits under it, and otherwise shown as given.
 
-Every config key maps to exactly one `check` CLI option, and vice versa; see the
-[CLI ↔ TOML parameter map](#cli--toml-parameter-map) and the config-selection and
-discovery-anchor rules in [Standalone CLI](#standalone-cli).
+### When to pick which file
 
-`include` is a whitelist. `exclude` is a blacklist and wins. `select` is a whitelist. `ignore` is a blacklist and wins. `noqa_allowed` and `noqa_forbidden` are path filters for files allowed to use `# noqa`; `noqa_forbidden` wins.
+- **`pyproject.toml [tool.flakeforge]`** — flakeforge is one of several tools the
+  project already configures in `pyproject.toml`. This is the default choice for
+  a tool-mode setup.
+- **`flakeforge.toml`** — a dedicated, standalone config, or when you want it to
+  win over an inherited `pyproject.toml` section in the same tree.
+- **`--config ci.toml`** — a throwaway or CI-specific profile that should apply
+  regardless of discovery; it wins over any discovered file.
+- **`--no-config`** — a hermetic run driven entirely by CLI flags, ignoring every
+  on-disk config and every project-local rule module.
 
 ## Built-in rules
 

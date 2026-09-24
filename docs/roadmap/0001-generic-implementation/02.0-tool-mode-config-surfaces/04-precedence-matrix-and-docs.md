@@ -1,7 +1,7 @@
 # 04 - Precedence matrix tests and docs
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Depends on:** [02](02-same-directory-precedence.md), [03](03-config-relative-paths.md)
 
 ## Requirements

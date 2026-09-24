@@ -143,6 +143,35 @@ def test_lint_paths_uses_include_roots_when_no_paths_are_passed(tmp_path) -> Non
     assert [violation.filename for violation in result.violations] == ["src/bad.py"]
 
 
+def test_lint_paths_display_is_base_relative_regardless_of_cwd(tmp_path) -> None:
+    project = tmp_path / "project"
+    pkg = project / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "m.py").write_text("def handler():\n    return 1\n", encoding="utf-8")
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+
+    config = LintConfig(
+        select=("X007",),
+        base_dir=project,
+        config_path=project / "flakeforge.toml",
+    )
+
+    # An ancestor cwd (G7 reproduction) and an unrelated sibling cwd must both
+    # yield the same base-relative display name.
+    outputs = []
+    cwd = Path.cwd()
+    for run_dir in (tmp_path, sibling):
+        try:
+            os.chdir(run_dir)
+            result = lint_paths(config=config)
+        finally:
+            os.chdir(cwd)
+        outputs.append([violation.filename for violation in result.violations])
+
+    assert outputs[0] == outputs[1] == ["pkg/m.py"]
+
+
 def test_lint_paths_explicit_paths_override_include_filters(tmp_path) -> None:
     project = tmp_path / "project"
     external = tmp_path / "external.py"

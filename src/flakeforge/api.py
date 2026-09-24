@@ -458,9 +458,18 @@ def _safe_traversal_root(pattern: str, root_dir: Path) -> Path:
 
 
 def _display_filename(path: Path, root_dir: Path) -> str:
-    """Return *path* relative to the cwd or *root_dir*, else its raw string."""
+    """Return *path* relative to the config ``base_dir``, else the cwd, else raw.
+
+    The config ``base_dir`` (*root_dir*) is tried first (plan contract C6) so a
+    ``--config`` run prints identical, base-relative names whatever the process
+    cwd is -- this fixes G7, where an ancestor cwd previously produced a long
+    ``project/pkg/m.py`` display instead of ``pkg/m.py``. The cwd is a secondary
+    anchor so sibling ``include`` roots such as ``../src`` still render cleanly,
+    and the raw (absolute) path is the last-resort fallback for a file that lies
+    under neither anchor.
+    """
     resolved = path.resolve()
-    for base in (Path.cwd().resolve(), root_dir):
+    for base in (root_dir, Path.cwd().resolve()):
         if resolved.is_relative_to(base):
             return resolved.relative_to(base).as_posix()
     return str(path)

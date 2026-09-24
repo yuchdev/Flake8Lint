@@ -148,6 +148,44 @@ def test_config_rejects_non_string_sequence_items() -> None:
         LintConfig.from_mapping({"ignore": [1]})
 
 
+@pytest.mark.parametrize("key", ["include", "exclude", "noqa_allowed", "noqa_forbidden"])
+def test_config_rejects_absolute_posix_path_pattern(key) -> None:
+    with pytest.raises(ConfigValidationError, match=rf"{key} pattern '/etc' must be relative"):
+        LintConfig.from_mapping({key: ["/etc"]})
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [r"C:\Users\app", "C:/Users/app", "C:foo", r"\\server\share\pkg", r"\rooted"],
+)
+def test_config_rejects_anchored_windows_pattern(pattern) -> None:
+    with pytest.raises(ConfigValidationError, match=r"must be relative"):
+        LintConfig.from_mapping({"include": [pattern]})
+
+
+def test_config_accepts_relative_parent_pattern() -> None:
+    config = LintConfig.from_mapping({"include": ["../src", "pkg/**/*.py", "~/x", "../../*.py"]})
+    assert config.include == ("../src", "pkg/**/*.py", "~/x", "../../*.py")
+
+
+def test_absolute_pattern_error_names_file_and_section(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text('exclude = ["/var/log"]\n', encoding="utf-8")
+    with pytest.raises(
+        ConfigValidationError,
+        match=r"flakeforge\.toml: exclude pattern '/var/log' must be relative",
+    ):
+        load_config(cwd=tmp_path)
+
+
+def test_absolute_pattern_rejected_in_legacy_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flake8_lint]\ninclude = ["/opt/pkg"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError, match=r"include pattern '/opt/pkg' must be relative"):
+        load_config(cwd=tmp_path)
+
+
 def test_validate_config_rejects_unknown_canonical_rule_selectors() -> None:
     with pytest.raises(ConfigValidationError, match="X999"):
         validate_config(LintConfig(select=("X001", "X999")), ("X001", "X002", "X003"))
@@ -212,3 +250,225 @@ def test_merge_overrides_output_format_and_rule_plugins_in_both_directions() -> 
     overridden = file_config.merge(output_format="text", rule_plugins=True)
     assert overridden.output_format == "text"
     assert overridden.rule_plugins is True
+
+
+def test_flakeforge_toml_unknown_key_raises_with_did_you_mean(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text('exlude = ["build"]\n', encoding="utf-8")
+    with pytest.raises(ConfigValidationError) as excinfo:
+        load_config(cwd=tmp_path)
+    message = str(excinfo.value)
+    assert message == "flakeforge.toml: unknown key 'exlude' (did you mean 'exclude'?)"
+
+
+def test_pyproject_unknown_key_names_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.flakeforge]\nslect = []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError) as excinfo:
+        load_config(cwd=tmp_path)
+    message = str(excinfo.value)
+    assert message.startswith("pyproject.toml [tool.flakeforge]: unknown key 'slect'")
+    assert "did you mean 'select'" in message
+
+
+def test_unknown_key_without_close_match_omits_hint() -> None:
+    with pytest.raises(ConfigValidationError) as excinfo:
+        LintConfig.from_mapping({"totallyunrelated": 1}, source="flakeforge.toml")
+    assert str(excinfo.value) == "flakeforge.toml: unknown key 'totallyunrelated'"
+
+
+def test_legacy_section_unknown_key_becomes_warning(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flake8_lint]\nignore = ["X003"]\nexlude = ["build"]\n',
+        encoding="utf-8",
+    )
+    config = load_config(cwd=tmp_path)
+    assert config.ignore == ("X003",)
+    assert config.legacy_mode is True
+    assert any("unknown key 'exlude'" in warning for warning in config.warnings)
+    assert LEGACY_SECTION_WARNING in config.warnings
+
+
+def test_type_error_carries_source_prefix(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text('allow_noqa = "false"\n', encoding="utf-8")
+    with pytest.raises(ConfigValidationError, match=r"flakeforge\.toml: allow_noqa must be a boolean"):
+        load_config(cwd=tmp_path)
+
+
+def test_path_pattern_type_error_carries_source_prefix(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text('include = "src"\n', encoding="utf-8")
+    with pytest.raises(ConfigValidationError, match=r"^flakeforge\.toml: include"):
+        load_config(cwd=tmp_path)
+
+
+def test_flakeforge_toml_wrapped_table_matches_flat(tmp_path) -> None:
+    flat_dir = tmp_path / "flat"
+    wrapped_dir = tmp_path / "wrapped"
+    flat_dir.mkdir()
+    wrapped_dir.mkdir()
+    (flat_dir / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    (wrapped_dir / "flakeforge.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X002"]\n',
+        encoding="utf-8",
+    )
+    flat = load_config(cwd=flat_dir)
+    wrapped = load_config(cwd=wrapped_dir)
+    assert flat.select == ("X002",)
+    assert wrapped.select == ("X002",)
+    assert flat == wrapped
+
+
+def test_flakeforge_toml_both_flat_and_wrapper_is_error(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'select = ["X001"]\n[tool.flakeforge]\nignore = ["X002"]\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError, match="not both"):
+        load_config(cwd=tmp_path)
+
+
+def test_valid_config_with_all_known_keys_loads_unchanged(tmp_path) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'include = ["src"]\n'
+        "exclude = []\n"
+        'select = ["X001"]\n'
+        "ignore = []\n"
+        "allow_noqa = true\n"
+        "noqa_allowed = []\n"
+        "noqa_forbidden = []\n"
+        "rule_modules = []\n"
+        "rule_plugins = false\n"
+        'output_format = "json"\n',
+        encoding="utf-8",
+    )
+    config = load_config(cwd=tmp_path)
+    assert config.include == ("src",)
+    assert config.select == ("X001",)
+    assert config.rule_plugins is False
+    assert config.output_format == "json"
+    assert config.warnings == ()
+
+
+def test_same_directory_flakeforge_toml_shadows_pyproject_with_warning(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X001"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ("pyproject.toml [tool.flakeforge] is shadowed by flakeforge.toml; remove one",)
+
+
+def test_same_directory_shadow_warning_names_legacy_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flake8_lint]\nignore = ["X003"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ("pyproject.toml [tool.flake8_lint] is shadowed by flakeforge.toml; remove one",)
+
+
+def test_same_directory_shadow_prefers_canonical_section_name(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X001"]\n[tool.flake8_lint]\nignore = ["X003"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.warnings == ("pyproject.toml [tool.flakeforge] is shadowed by flakeforge.toml; remove one",)
+
+
+def test_shadow_check_ignores_pyproject_without_flakeforge_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.black]\nline-length = 100\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ()
+
+
+def test_shadow_check_does_not_error_on_unknown_key_in_shadowed_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nslect = ["X001"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ("pyproject.toml [tool.flakeforge] is shadowed by flakeforge.toml; remove one",)
+
+
+def test_shadow_check_tolerates_unparseable_sibling_pyproject(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text("this is = = not valid toml\n", encoding="utf-8")
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config(cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ()
+
+
+def test_nearest_pyproject_section_beats_parent_flakeforge_toml(tmp_path) -> None:
+    parent = tmp_path / "project"
+    nested = parent / "pkg"
+    nested.mkdir(parents=True)
+    (parent / "flakeforge.toml").write_text('select = ["X001"]\n', encoding="utf-8")
+    (nested / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X002"]\n',
+        encoding="utf-8",
+    )
+    config = load_config(cwd=nested)
+    assert config.select == ("X002",)
+    assert config.base_dir == nested
+    assert config.warnings == ()
+
+
+def test_pyproject_without_flakeforge_section_does_not_stop_upward_search(tmp_path) -> None:
+    parent = tmp_path / "project"
+    nested = parent / "pkg"
+    nested.mkdir(parents=True)
+    (parent / "flakeforge.toml").write_text('select = ["X001"]\n', encoding="utf-8")
+    (nested / "pyproject.toml").write_text(
+        "[tool.black]\nline-length = 100\n",
+        encoding="utf-8",
+    )
+    config = load_config(cwd=nested)
+    assert config.select == ("X001",)
+    assert config.base_dir == parent
+    assert config.warnings == ()
+
+
+def test_explicit_config_accepts_pyproject_and_flakeforge_toml(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X001"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    from_pyproject = load_config("pyproject.toml", cwd=tmp_path)
+    from_flakeforge = load_config("flakeforge.toml", cwd=tmp_path)
+    assert from_pyproject.select == ("X001",)
+    assert from_flakeforge.select == ("X002",)
+
+
+def test_explicit_config_flakeforge_toml_does_not_warn_about_sibling_pyproject(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X001"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    config = load_config("flakeforge.toml", cwd=tmp_path)
+    assert config.select == ("X002",)
+    assert config.warnings == ()
+
+
+def test_explicit_config_pyproject_without_section_is_error(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.black]\nline-length = 100\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError):
+        load_config("pyproject.toml", cwd=tmp_path)

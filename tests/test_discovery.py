@@ -1,5 +1,30 @@
+import os
+from pathlib import Path
+
 from flakeforge.config import LintConfig
 from flakeforge.discovery import discover_python_files
+
+
+def test_discovery_include_resolves_against_base_dir_regardless_of_cwd(tmp_path) -> None:
+    project = tmp_path / "project"
+    src = project / "src"
+    src.mkdir(parents=True)
+    (src / "keep.py").write_text("x = 1\n", encoding="utf-8")
+    (project / "skip.py").write_text("x = 1\n", encoding="utf-8")
+    sibling = tmp_path / "elsewhere"
+    sibling.mkdir()
+
+    config = LintConfig(include=("src",), base_dir=project)
+    results = []
+    cwd = Path.cwd()
+    for run_dir in (tmp_path, sibling):
+        try:
+            os.chdir(run_dir)
+            results.append(discover_python_files((project,), config=config))
+        finally:
+            os.chdir(cwd)
+
+    assert results[0] == results[1] == ((src / "keep.py").resolve(),)
 
 
 def test_discovery_skips_default_excluded_directories(tmp_path) -> None:

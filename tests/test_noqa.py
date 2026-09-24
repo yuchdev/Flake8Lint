@@ -1,4 +1,6 @@
 import ast
+import os
+from pathlib import Path
 
 from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_tree
 from flakeforge.config import LintConfig
@@ -115,6 +117,32 @@ def test_noqa_forbidden_path_wins_over_noqa_allowed(tmp_path) -> None:
         ),
     )
     assert [violation.code for violation in violations] == ["X002"]
+
+
+def test_noqa_path_policy_matches_base_relative_regardless_of_cwd(tmp_path) -> None:
+    filename = str(tmp_path / "src" / "sample.py")
+    outcomes = []
+    cwd = Path.cwd()
+    for run_dir in (tmp_path, tmp_path.parent):
+        try:
+            os.chdir(run_dir)
+            violations = check_tree(
+                ast.parse(SOURCE, filename=filename),
+                filename,
+                SOURCE,
+                config=LintConfig(
+                    select=("X002",),
+                    noqa_forbidden=("src/sample.py",),
+                    base_dir=tmp_path,
+                ),
+            )
+        finally:
+            os.chdir(cwd)
+        outcomes.append(tuple(violation.code for violation in violations))
+
+    # noqa_forbidden matches the base-relative path in both runs, so the
+    # ``# noqa: X002`` is never honoured whatever the cwd.
+    assert outcomes[0] == outcomes[1] == ("X002",)
 
 
 def test_noqa_parsing_ignores_hash_inside_string_literals() -> None:

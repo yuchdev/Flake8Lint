@@ -280,6 +280,29 @@ def test_cli_exclude_replaces_config_list(tmp_path, monkeypatch, capsys) -> None
     assert "pkg/sample.py" in capsys.readouterr().out
 
 
+def test_cli_absolute_config_pattern_exits_error(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('include = ["/etc"]\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--config", "flakeforge.toml", "sample.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "include pattern '/etc' must be relative" in captured.err
+
+
+def test_cli_absolute_include_flag_is_not_a_config_error(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text(
+        'def documented() -> int:\n    """Doc."""\n    return 1\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    # Operator-supplied absolute --include is accepted, not rejected as a config
+    # file would be; it never yields the exit-2 config error.
+    exit_code = main(["check", "--no-config", "--include", str(tmp_path / "src")])
+    assert exit_code != 2
+    assert "must be relative" not in capsys.readouterr().err
+
+
 def test_cli_config_and_no_config_are_mutually_exclusive(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "flakeforge.toml").write_text("select = []\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -397,3 +420,37 @@ def test_cli_no_rule_plugins_overrides_config_true(monkeypatch, tmp_path, capsys
     monkeypatch.chdir(tmp_path)
     assert main(["check", str(sample), "--select", "ZZZ", "--no-rule-plugins"]) == 2
     assert "Unknown select rule selector(s): ZZZ" in capsys.readouterr().err
+
+
+def test_cli_unknown_config_key_exits_2_with_hint_on_stderr(tmp_path, monkeypatch, capsys) -> None:
+    # G5 reproduction: a typo'd key fails loudly instead of being silently ignored.
+    (tmp_path / "flakeforge.toml").write_text('exlude = ["build"]\n', encoding="utf-8")
+    sample = tmp_path / "sample.py"
+    sample.write_text("x = 1\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", str(sample)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "flakeforge.toml: unknown key 'exlude' (did you mean 'exclude'?)" in captured.err
+
+
+def test_cli_same_directory_shadow_prints_exactly_one_warning(tmp_path, monkeypatch, capsys) -> None:
+    # G6 reproduction: flakeforge.toml shadows a sibling pyproject [tool.flakeforge]
+    # section; exactly one warning reaches stderr and the flakeforge.toml policy wins.
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flakeforge]\nselect = ["X001"]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "flakeforge.toml").write_text('select = ["X002"]\n', encoding="utf-8")
+    sample = tmp_path / "sample.py"
+    sample.write_text(
+        'def documented() -> int:\n    """Return a number."""\n    return 1\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "sample.py"]) == 0
+    captured = capsys.readouterr()
+    shadow_lines = [line for line in captured.err.splitlines() if "is shadowed by flakeforge.toml" in line]
+    assert shadow_lines == ["flakeforge: pyproject.toml [tool.flakeforge] is shadowed by flakeforge.toml; remove one"]

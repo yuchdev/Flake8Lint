@@ -322,3 +322,156 @@ jobs:
             echo "expected ACME001 from an uninstalled, non-PYTHONPATH rule module" >&2
             exit 1
           fi
+
+          # --- Config precedence matrix (02.0/04) ---
+          # Runs from the checkout root (cwd OUTSIDE each fixture) with absolute
+          # targets, so discovery anchors on the target (C4). Every winning
+          # config ignores X001 -- the only code app.py triggers under
+          # --select X001 -- so an honored config is clean (0) and a skipped or
+          # overridden config lets the bare except fire (1).
+          mkdir -p \
+            "$tmpdir/prec/ff/proj" \
+            "$tmpdir/prec/pyproj/proj" \
+            "$tmpdir/prec/legacy/proj" \
+            "$tmpdir/prec/shadow/proj" \
+            "$tmpdir/prec/nested/proj/pkg"
+
+          # A: a discovered flakeforge.toml that ignores X001 -> clean (exit 0).
+          cat > "$tmpdir/prec/ff/proj/app.py" <<'PY'
+          def f():
+              try:
+                  run()
+              except:
+                  return 1
+          PY
+          cat > "$tmpdir/prec/ff/proj/flakeforge.toml" <<'TOML'
+          ignore = ["X001"]
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --select X001 "$tmpdir/prec/ff/proj"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected flakeforge.toml discovery clean exit 0, got $status" >&2
+            exit 1
+          fi
+
+          # B: a discovered pyproject.toml [tool.flakeforge] -> clean (exit 0).
+          cat > "$tmpdir/prec/pyproj/proj/app.py" <<'PY'
+          def f():
+              try:
+                  run()
+              except:
+                  return 1
+          PY
+          cat > "$tmpdir/prec/pyproj/proj/pyproject.toml" <<'TOML'
+          [tool.flakeforge]
+          ignore = ["X001"]
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --select X001 "$tmpdir/prec/pyproj/proj"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected pyproject [tool.flakeforge] discovery clean exit 0, got $status" >&2
+            exit 1
+          fi
+
+          # C: legacy [tool.flake8_lint] still governs, with a deprecation warning.
+          cat > "$tmpdir/prec/legacy/proj/app.py" <<'PY'
+          def f():
+              try:
+                  run()
+              except:
+                  return 1
+          PY
+          cat > "$tmpdir/prec/legacy/proj/pyproject.toml" <<'TOML'
+          [tool.flake8_lint]
+          ignore = ["X001"]
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --select X001 "$tmpdir/prec/legacy/proj" 2>"$tmpdir/prec/legacy.err"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected legacy [tool.flake8_lint] clean exit 0, got $status" >&2
+            exit 1
+          fi
+          if ! grep -q 'deprecated' "$tmpdir/prec/legacy.err"; then
+            echo "expected a deprecation warning for [tool.flake8_lint]" >&2
+            exit 1
+          fi
+
+          # D: same-directory shadow -> flakeforge.toml wins, exactly one warning.
+          cat > "$tmpdir/prec/shadow/proj/app.py" <<'PY'
+          def f():
+              try:
+                  run()
+              except:
+                  return 1
+          PY
+          cat > "$tmpdir/prec/shadow/proj/flakeforge.toml" <<'TOML'
+          ignore = ["X001"]
+          TOML
+          cat > "$tmpdir/prec/shadow/proj/pyproject.toml" <<'TOML'
+          [tool.flakeforge]
+          select = []
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --select X001 "$tmpdir/prec/shadow/proj" 2>"$tmpdir/prec/shadow.err"
+          status=$?
+          shadow_count="$(grep -c 'is shadowed by flakeforge.toml' "$tmpdir/prec/shadow.err")"
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected same-dir shadow clean exit 0, got $status" >&2
+            exit 1
+          fi
+          if [ "$shadow_count" -ne 1 ]; then
+            echo "expected exactly one shadow warning, got $shadow_count" >&2
+            exit 1
+          fi
+
+          # E: parent/child nesting -> the nearest pyproject wins and does NOT
+          # ignore X001, so the parent flakeforge.toml is never consulted (exit 1).
+          cat > "$tmpdir/prec/nested/proj/pkg/app.py" <<'PY'
+          def f():
+              try:
+                  run()
+              except:
+                  return 1
+          PY
+          cat > "$tmpdir/prec/nested/proj/flakeforge.toml" <<'TOML'
+          ignore = ["X001"]
+          TOML
+          cat > "$tmpdir/prec/nested/proj/pkg/pyproject.toml" <<'TOML'
+          [tool.flakeforge]
+          select = []
+          TOML
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --select X001 "$tmpdir/prec/nested/proj/pkg"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected nearest-config exit 1 (parent not consulted), got $status" >&2
+            exit 1
+          fi
+
+          # F: --config overrides discovery -> parent flakeforge.toml wins (exit 0).
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --config "$tmpdir/prec/nested/proj/flakeforge.toml" --select X001 "$tmpdir/prec/nested/proj/pkg"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "expected --config override clean exit 0, got $status" >&2
+            exit 1
+          fi
+
+          # G: --no-config skips the discovered flakeforge.toml -> X001 fires (exit 1).
+          set +e
+          "$tmpdir/venv/bin/flakeforge" check --no-config --select X001 "$tmpdir/prec/ff/proj"
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected --no-config exit 1 (config skipped), got $status" >&2
+            exit 1
+          fi
