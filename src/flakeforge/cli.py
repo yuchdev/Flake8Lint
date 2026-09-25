@@ -21,6 +21,7 @@ from .api import (
     lint_paths,
     validate_output_format,
 )
+from .baseline import write_baseline
 from .config import (
     LintConfig,
     describe_config_source,
@@ -61,6 +62,13 @@ def _add_common_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--include", action="append", default=[])
     parser.add_argument("--exclude", action="append", default=[])
     parser.add_argument(
+        "--per-file-ignores",
+        action="append",
+        default=[],
+        metavar="GLOB:CODE[,CODE]",
+        help="Suppress rule-code prefixes for files matching GLOB; repeatable, replaces the config file's table",
+    )
+    parser.add_argument(
         "--noqa",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -74,6 +82,12 @@ def _add_common_arguments(parser: argparse.ArgumentParser):
         help="Load (or, with --no-rule-plugins, skip) installed flakeforge.rules providers",
     )
     parser.add_argument("--output-format", choices=tuple(FORMATTERS), default=None)
+    parser.add_argument(
+        "--baseline",
+        default=None,
+        metavar="PATH",
+        help="Suppress violations whose fingerprint is recorded in the baseline file at PATH",
+    )
     parser.add_argument(
         "--statistics",
         action=argparse.BooleanOptionalAction,
@@ -100,10 +114,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_arguments(common)
 
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser(
+    check_parser = subparsers.add_parser(
         "check",
         parents=[common],
         help="Lint one or more files or directories",
+    )
+    check_parser.add_argument(
+        "--write-baseline",
+        default=None,
+        metavar="PATH",
+        help="Write every current violation's fingerprint to PATH and exit 0 (ignores --baseline)",
     )
 
     config_parser = subparsers.add_parser("config", help="Inspect resolved configuration")
@@ -174,8 +194,14 @@ def _run_check(args: argparse.Namespace) -> int:
     if missing:
         return EXIT_ERROR
 
+    writing_baseline = args.write_baseline is not None
     try:
         config = _build_cli_config(args)
+        if writing_baseline:
+            # --write-baseline records the full current set, so an existing
+            # baseline is not applied first (it would hide violations from the
+            # file being written).
+            config = config.merge(baseline="")
         validate_output_format(config.output_format)
         registry = resolve_registry(
             rule_modules=config.rule_modules,
@@ -190,6 +216,8 @@ def _run_check(args: argparse.Namespace) -> int:
             config=config,
             registry=registry,
         )
+        if writing_baseline:
+            return _write_baseline_result(result, args.write_baseline)
         output = format_result(result, config.output_format, statistics=config.statistics)
     except (OSError, ValueError, RuntimeError, SyntaxError) as exc:
         print(f"flakeforge: {exc}", file=sys.stderr)
@@ -198,6 +226,20 @@ def _run_check(args: argparse.Namespace) -> int:
     if output:
         print(output)
     return EXIT_OK if result.ok else EXIT_VIOLATIONS
+
+
+def _write_baseline_result(result, path: str) -> int:
+    """Persist every current violation's fingerprint and exit ``0`` (C1).
+
+    Writes the full reported set (after select/ignore, ``per_file_ignores`` and
+    ``# noqa``), regardless of how many violations there are, so the run always
+    exits clean; the baseline is the record of what is being accepted today.
+    """
+    written = write_baseline(path, result.fingerprints)
+    count = len(result.fingerprints)
+    noun = "entry" if count == 1 else "entries"
+    print(f"Wrote {count} baseline {noun} to {written}")
+    return EXIT_OK
 
 
 def _run_config(args: argparse.Namespace) -> int:
@@ -497,6 +539,8 @@ def _cli_override_keys(args: argparse.Namespace) -> set[str]:
         keys.add("include")
     if args.exclude:
         keys.add("exclude")
+    if args.per_file_ignores:
+        keys.add("per_file_ignores")
     if args.noqa is not None:
         keys.add("allow_noqa")
     if args.rule_module:
@@ -507,6 +551,8 @@ def _cli_override_keys(args: argparse.Namespace) -> set[str]:
         keys.add("output_format")
     if args.statistics is not None:
         keys.add("statistics")
+    if args.baseline is not None:
+        keys.add("baseline")
     return keys
 
 
@@ -517,10 +563,16 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
     ignore = _split_codes(args.ignore)
     include = _split_patterns(args.include)
     exclude = _split_patterns(args.exclude)
+    per_file_ignores = _parse_per_file_ignores(args.per_file_ignores)
     rule_modules = tuple(args.rule_module)
+    # A CLI --baseline is resolved to an absolute path up front, so it stays
+    # cwd-relative (unlike a config-file value, which is base_dir-relative, C6);
+    # None leaves the file's value in place (precedence C2).
+    baseline = str(Path(args.baseline).resolve()) if args.baseline else None
     return config.merge(
         include=include if include else None,
         exclude=exclude if exclude else None,
+        per_file_ignores=per_file_ignores if per_file_ignores else None,
         select=select if select else None,
         ignore=ignore if ignore else None,
         allow_noqa=args.noqa,
@@ -528,6 +580,7 @@ def _build_cli_config(args: argparse.Namespace) -> LintConfig:
         rule_plugins=args.rule_plugins,
         output_format=args.output_format,
         statistics=args.statistics,
+        baseline=baseline,
     )
 
 
@@ -549,6 +602,32 @@ def _split_patterns(values: list[str]) -> tuple[str, ...]:
     for value in values:
         parsed.extend(chunk.strip() for chunk in value.split(",") if chunk.strip())
     return tuple(parsed)
+
+
+def _parse_per_file_ignores(values: list[str]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Parse repeatable ``--per-file-ignores "GLOB:CODE[,CODE]"`` flags.
+
+    Each value splits on its first ``:`` into a glob and a comma-separated list
+    of upper-cased rule-code prefixes. A supplied flag *replaces* the config
+    file's table (plan contract C2); this returns the CLI entries in order, and
+    the caller passes ``None`` to :meth:`LintConfig.merge` only when no flag was
+    given. A value with no ``:``, an empty glob, or no codes is malformed and
+    raises, which the CLI maps to exit ``2`` (plan contract C1). Codes are not
+    validated against the registry here -- :func:`validate_config` does that.
+
+    :param values: The raw ``--per-file-ignores`` flag values.
+    :returns: Ordered ``(glob, codes)`` pairs.
+    :raises ValueError: On a malformed value.
+    """
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    for value in values:
+        glob, separator, raw_codes = value.partition(":")
+        glob = glob.strip()
+        codes = tuple(chunk.strip().upper() for chunk in raw_codes.split(",") if chunk.strip())
+        if not separator or not glob or not codes:
+            raise ValueError(f"malformed --per-file-ignores value {value!r}; expected GLOB:CODE[,CODE]")
+        entries.append((glob, codes))
+    return tuple(entries)
 
 
 def _merge_unique(existing: tuple[str, ...], extra: tuple[str, ...]) -> tuple[str, ...]:
@@ -586,7 +665,7 @@ def _render_config_show_text(
         f"base_dir: {config.base_dir if config.base_dir is not None else '-'}",
         "",
     ]
-    values = {key: _format_setting_value(getattr(config, key)) for key in origins}
+    values = {key: _format_setting_value(key, getattr(config, key)) for key in origins}
     name_width = max(len(key) for key in origins)
     value_width = max(len(value) for value in values.values())
     header = f"{'setting'.ljust(name_width)}  {'value'.ljust(value_width)}  origin"
@@ -612,7 +691,7 @@ def _render_config_show_json(
             "section": section,
         },
         "settings": {
-            key: {"origin": origin, "value": _jsonable_setting_value(getattr(config, key))}
+            key: {"origin": origin, "value": _jsonable_setting_value(key, getattr(config, key))}
             for key, origin in origins.items()
         },
     }
@@ -677,8 +756,15 @@ def _render_rules_json(rows: list[dict[str, object]]) -> str:
     return json.dumps(document, sort_keys=True, indent=2)
 
 
-def _format_setting_value(value: object) -> str:
-    """Render a schema value for the aligned text table."""
+def _format_setting_value(key: str, value: object) -> str:
+    """Render a schema value for the aligned text table.
+
+    ``per_file_ignores`` is a nested table rather than a flat list, so it renders
+    compactly as ``{glob=[c1,c2],glob2=[c3]}`` (``{}`` when empty) -- no internal
+    whitespace, keeping the aligned-column table parseable.
+    """
+    if key == "per_file_ignores":
+        return _format_per_file_ignores_value(value)
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, tuple):
@@ -686,8 +772,24 @@ def _format_setting_value(value: object) -> str:
     return str(value)
 
 
-def _jsonable_setting_value(value: object) -> object:
-    """Convert a schema value into a JSON-serialisable form (tuples -> lists)."""
+def _format_per_file_ignores_value(value: object) -> str:
+    """Render the ``per_file_ignores`` table as ``{glob=[codes],...}``."""
+    entries = value if isinstance(value, tuple) else ()
+    if not entries:
+        return "{}"
+    rendered = ",".join(f"{glob}=[{','.join(codes)}]" for glob, codes in entries)
+    return "{" + rendered + "}"
+
+
+def _jsonable_setting_value(key: str, value: object) -> object:
+    """Convert a schema value into a JSON-serialisable form.
+
+    Tuples become lists; ``per_file_ignores`` becomes a JSON object mapping each
+    glob to its list of code prefixes, mirroring the TOML table it comes from.
+    """
+    if key == "per_file_ignores":
+        entries = value if isinstance(value, tuple) else ()
+        return {glob: list(codes) for glob, codes in entries}
     if isinstance(value, tuple):
         return list(value)
     return value

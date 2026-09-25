@@ -1,7 +1,7 @@
 # 01 - `per_file_ignores`
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 
 ## Requirements
 

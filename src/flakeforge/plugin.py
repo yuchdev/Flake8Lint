@@ -51,10 +51,7 @@ class ProjectRulesPlugin:
             getattr(options, "ignore", ()),
             getattr(options, "extend_ignore", ()),
         )
-        disable_noqa = bool(
-            getattr(options, "disable_noqa", False)
-            or getattr(options, "flakeforge_no_noqa", False)
-        )
+        disable_noqa = bool(getattr(options, "disable_noqa", False) or getattr(options, "flakeforge_no_noqa", False))
         cls._config = LintConfig(
             select=select,
             ignore=ignore,
@@ -82,6 +79,10 @@ class ProjectRulesPlugin:
             validate_selectors=False,
             config=type(self)._config,
             registry=type(self)._registry,
+            # Flake8 owns noqa handling in the adapter, so the engine must not
+            # emit the unused-noqa code (X015) here; its view of what a directive
+            # suppresses can differ from Flake8's.
+            emit_unused_noqa=False,
         ):
             yield (
                 violation.lineno,

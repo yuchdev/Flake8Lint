@@ -208,6 +208,76 @@ def test_validate_config_ignores_unknown_legacy_rules_with_warning() -> None:
     assert any("X999" in warning for warning in config.warnings)
 
 
+def test_per_file_ignores_parses_table_upper_cases_codes_and_keeps_order() -> None:
+    config = LintConfig.from_mapping({"per_file_ignores": {"tests/**": ["x002"], "scripts/*.py": ["X0", "x001"]}})
+    assert config.per_file_ignores == (
+        ("tests/**", ("X002",)),
+        ("scripts/*.py", ("X0", "X001")),
+    )
+
+
+def test_per_file_ignores_defaults_to_empty_table() -> None:
+    assert LintConfig.from_mapping({}).per_file_ignores == ()
+    assert LintConfig().per_file_ignores == ()
+    assert "per_file_ignores" in CONFIG_KEYS
+
+
+def test_per_file_ignores_rejects_non_table() -> None:
+    with pytest.raises(ConfigValidationError, match=r"per_file_ignores must be a table"):
+        LintConfig.from_mapping({"per_file_ignores": ["tests/**"]})
+
+
+def test_per_file_ignores_rejects_non_string_codes() -> None:
+    with pytest.raises(ConfigValidationError, match=r"per_file_ignores"):
+        LintConfig.from_mapping({"per_file_ignores": {"tests/**": [1]}})
+
+
+@pytest.mark.parametrize("glob", ["/etc/**", r"C:\Users\app", "C:/app", r"\\server\share"])
+def test_per_file_ignores_rejects_absolute_glob(glob) -> None:
+    with pytest.raises(ConfigValidationError, match=r"per_file_ignores pattern .* must be relative"):
+        LintConfig.from_mapping({"per_file_ignores": {glob: ["X001"]}})
+
+
+def test_per_file_ignores_absolute_glob_rejected_in_legacy_section(tmp_path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.flake8_lint]\nper_file_ignores = { "/opt/**" = ["X001"] }\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError, match=r"per_file_ignores pattern '/opt/\*\*' must be relative"):
+        load_config(cwd=tmp_path)
+
+
+def test_validate_config_rejects_unknown_per_file_ignore_code() -> None:
+    config = LintConfig(per_file_ignores=(("tests/**", ("X999",)),))
+    with pytest.raises(ConfigValidationError, match="X999"):
+        validate_config(config, ("X001", "X002", "X003"))
+
+
+def test_validate_config_keeps_known_per_file_ignore_code() -> None:
+    config = LintConfig(per_file_ignores=(("tests/**", ("x002",)),))
+    validated = validate_config(config, ("X001", "X002", "X003"))
+    assert validated.per_file_ignores == (("tests/**", ("X002",)),)
+
+
+def test_validate_config_drops_unknown_legacy_per_file_ignore_with_warning() -> None:
+    config = LintConfig(
+        per_file_ignores=(("tests/**", ("X002", "X999")),),
+        legacy_mode=True,
+        warnings=(LEGACY_SECTION_WARNING,),
+    )
+    validated = validate_config(config, ("X001", "X002", "X003"))
+    assert validated.per_file_ignores == (("tests/**", ("X002",)),)
+    assert any("X999" in warning for warning in validated.warnings)
+
+
+def test_merge_replaces_per_file_ignores_when_provided() -> None:
+    base = LintConfig(per_file_ignores=(("tests/**", ("X001",)),))
+    merged = base.merge(per_file_ignores=(("scripts/*.py", ("X0",)),))
+    assert merged.per_file_ignores == (("scripts/*.py", ("X0",)),)
+    # A None leaves the field untouched.
+    assert base.merge().per_file_ignores == (("tests/**", ("X001",)),)
+
+
 def test_merge_normalizes_code_prefixes_without_touching_path_fields() -> None:
     merged = LintConfig().merge(
         select=("x0",),
@@ -528,3 +598,30 @@ def test_describe_config_source_defaults_and_sections(tmp_path) -> None:
 
     legacy = LintConfig(config_path=pyproject, legacy_mode=True)
     assert describe_config_source(legacy) == (pyproject, "[tool.flake8_lint]")
+
+
+def test_baseline_key_loads_relative_and_defaults_empty(tmp_path) -> None:
+    assert LintConfig.from_mapping({}).baseline == ""
+    loaded = LintConfig.from_mapping({"baseline": "ci/baseline.json"})
+    assert loaded.baseline == "ci/baseline.json"
+
+
+def test_baseline_absolute_path_is_rejected() -> None:
+    with pytest.raises(ConfigValidationError, match="must be relative"):
+        LintConfig.from_mapping({"baseline": "/var/lib/baseline.json"})
+
+
+def test_baseline_non_string_is_rejected() -> None:
+    with pytest.raises(ConfigValidationError, match="baseline must be a string"):
+        LintConfig.from_mapping({"baseline": 3})
+
+
+def test_merge_overrides_baseline() -> None:
+    assert LintConfig(baseline="a.json").merge(baseline="b.json").baseline == "b.json"
+    # None leaves the existing value untouched (precedence C2).
+    assert LintConfig(baseline="a.json").merge(baseline=None).baseline == "a.json"
+
+
+def test_per_file_ignores_rejects_empty_code() -> None:
+    with pytest.raises(ConfigValidationError, match="must not be empty"):
+        LintConfig.from_mapping({"per_file_ignores": {"tests/**": [""]}})

@@ -81,6 +81,103 @@ def test_check_tree_without_source_does_not_apply_noqa() -> None:
     assert [violation.code for violation in violations] == ["ORG001"]
 
 
+def test_per_file_ignore_suppresses_matching_code_and_glob() -> None:
+    registry = RuleRegistry()
+    registry.register(DemoRule(), provider="tests.demo")
+    config = LintConfig(
+        select=("ORG001",),
+        per_file_ignores=(("pkg/**", ("ORG001",)),),
+        base_dir=Path.cwd(),
+    )
+    violations = check_tree(
+        ast.parse("x = 1", filename="pkg/mod.py"),
+        "pkg/mod.py",
+        "x = 1\n",
+        config=config,
+        registry=registry,
+    )
+    assert violations == ()
+
+
+def test_per_file_ignore_matches_by_code_prefix_and_glob() -> None:
+    registry = RuleRegistry()
+    registry.register(DemoRule(), provider="tests.demo")
+
+    def run(per_file_ignores):
+        config = LintConfig(select=("ORG001",), per_file_ignores=per_file_ignores, base_dir=Path.cwd())
+        return check_tree(
+            ast.parse("x = 1", filename="pkg/mod.py"),
+            "pkg/mod.py",
+            "x = 1\n",
+            config=config,
+            registry=registry,
+        )
+
+    # A code prefix (not just the full code) covers the violation.
+    assert run((("pkg/**", ("ORG",)),)) == ()
+    assert run((("pkg/**", ("ORG001",)),)) == ()
+    # A glob that does not match the file leaves the violation untouched.
+    assert [v.code for v in run((("other/**", ("ORG001",)),))] == ["ORG001"]
+
+
+def test_per_file_ignore_applies_before_noqa_handling() -> None:
+    registry = RuleRegistry()
+    registry.register(DemoRule(), provider="tests.demo")
+    # The line's # noqa names a different code, so it would NOT cover ORG001;
+    # the violation vanishes only because per_file_ignores runs first.
+    config = LintConfig(
+        select=("ORG001",),
+        per_file_ignores=(("pkg/**", ("ORG001",)),),
+        base_dir=Path.cwd(),
+    )
+    suppressed = check_tree(
+        ast.parse("x = 1", filename="pkg/mod.py"),
+        "pkg/mod.py",
+        "# noqa: X001\n",
+        config=config,
+        registry=registry,
+    )
+    assert suppressed == ()
+    # Without the per-file entry the same non-covering noqa leaves it in place.
+    kept = check_tree(
+        ast.parse("x = 1", filename="pkg/mod.py"),
+        "pkg/mod.py",
+        "# noqa: X001\n",
+        config=LintConfig(select=("ORG001",), base_dir=Path.cwd()),
+        registry=registry,
+    )
+    assert [v.code for v in kept] == ["ORG001"]
+
+
+def test_lint_paths_per_file_ignore_is_base_relative_regardless_of_cwd(tmp_path) -> None:
+    project = tmp_path / "project"
+    pkg = project / "pkg"
+    pkg.mkdir(parents=True)
+    (pkg / "m.py").write_text("def handler():\n    return 1\n", encoding="utf-8")
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+
+    config = LintConfig(
+        select=("X007",),
+        base_dir=project,
+        config_path=project / "flakeforge.toml",
+        per_file_ignores=(("pkg/**", ("X0",)),),
+    )
+
+    outputs = []
+    cwd = Path.cwd()
+    for run_dir in (tmp_path, sibling):
+        try:
+            os.chdir(run_dir)
+            result = lint_paths(config=config)
+        finally:
+            os.chdir(cwd)
+        outputs.append([violation.filename for violation in result.violations])
+
+    # The glob resolves against base_dir, so pkg/m.py is silenced from any cwd.
+    assert outputs[0] == outputs[1] == []
+
+
 def test_check_source_accepts_rules_directly() -> None:
     violations = check_source(
         "x = 1\n",

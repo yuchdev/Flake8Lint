@@ -8,7 +8,7 @@ Reusable AST-based Python lint rules with a standalone CLI, a thin Flake8 adapte
 
 - standalone `flakeforge check`
 - shared Python API
-- built-in X001–X014 rules, all enabled by default
+- built-in X001–X015 rules, all enabled by default
 - project-local and installed custom rules
 - opt-in pytest helper
 - thin Flake8 integration over the same core engine
@@ -191,6 +191,7 @@ ignore = []
 allow_noqa = true
 noqa_allowed = []
 noqa_forbidden = []
+per_file_ignores = {}
 rule_modules = []
 rule_plugins = true
 output_format = "text"
@@ -205,6 +206,7 @@ ignore = []
 allow_noqa = true
 noqa_allowed = []
 noqa_forbidden = []
+per_file_ignores = {}
 rule_modules = []
 rule_plugins = true
 output_format = "text"
@@ -230,8 +232,50 @@ unknown key is only a warning.
 | `--rule-plugins` / `--no-rule-plugins` | `rule_plugins`                   | bool / `true`                      |
 | `--output-format`                      | `output_format`                  | `"text"` / `"json"` / `"github"` / `"sarif"`, default `"text"` |
 | `--statistics` / `--no-statistics`     | `statistics`                     | bool / `false`                     |
+| `--per-file-ignores GLOB:CODE[,CODE]`  | `per_file_ignores`               | table `{glob = [codes]}` / `{}`    |
+| `--baseline PATH`                      | `baseline`                       | str path / `""` (none)             |
+| `--write-baseline PATH`                | *(CLI-only, no TOML key)*        | write current fingerprints, exit `0` |
 | `--no-config`                          | *(CLI-only, no TOML key)*        | flag; skip discovery, defaults + CLI |
 | *(file-only, no CLI flag)*             | `noqa_allowed`, `noqa_forbidden` | list[str] / `[]`                   |
+
+`per_file_ignores` maps a path glob (resolved against the config file's
+directory like `include`/`exclude`, C6; absolute globs are a config error) to
+rule-code prefixes skipped for matching files — e.g.
+`per_file_ignores = { "tests/**" = ["X002"], "scripts/*.py" = ["X0"] }`. The
+codes are validated like `ignore` (an unknown selector exits `2`) and applied by
+the engine after rule execution and before `# noqa`. The repeatable
+`--per-file-ignores "GLOB:CODE[,CODE]"` flag **replaces** the file's whole table
+(C2); a malformed value exits `2`.
+
+### Baseline (incremental adoption)
+
+A **baseline** lets an existing codebase adopt `flakeforge` without fixing every
+violation on day one: it records the violations you accept today so later runs
+fail only on *new* ones. The workflow is **write once, commit, shrink over time**:
+
+```bash
+# 1. Record every current violation and commit the file.
+flakeforge check --write-baseline flakeforge-baseline.json src
+git add flakeforge-baseline.json
+
+# 2. From then on, gate on new violations only (exit 1 only for new ones).
+flakeforge check --baseline flakeforge-baseline.json src
+```
+
+Each recorded entry is a fingerprint —
+`sha256(code + relative path + normalized source line text)` plus an occurrence
+index for identical lines. Because it hashes the *line text*, not the line
+*number*, a baselined violation stays suppressed when unrelated lines are added
+above it, but **re-surfaces the moment you edit the flagged line** — so the
+baseline can only shrink, never silently absorb a regression. `--write-baseline`
+always exits `0` (it records, it does not gate) and writes the full current set,
+ignoring any `--baseline` in effect.
+
+Set it in config with `baseline = "flakeforge-baseline.json"` (a path relative to
+the config file, C6; absolute paths are rejected). When a recorded entry no
+longer matches anything it is reported as **fixed** — a count in text output and
+a list under the additive `baseline` key in JSON — so you know what to prune. A
+missing or malformed baseline file exits `2`.
 
 `noqa_allowed` and `noqa_forbidden` are **file-only**: they have no matching CLI
 flag and can be set only in a config file. Boolean flags use
@@ -276,8 +320,9 @@ fallback is now retired). The CLI warns:
 
 ### Path patterns (C6)
 
-The path-pattern keys — `include`, `exclude`, `noqa_allowed`, `noqa_forbidden` —
-resolve against the **directory of the config file** they appear in, not the
+The path-pattern keys — `include`, `exclude`, `noqa_allowed`, `noqa_forbidden`,
+and the `per_file_ignores` globs — resolve against the **directory of the config
+file** they appear in, not the
 current working directory. With `--no-config` they resolve against the discovery
 anchor. Absolute patterns are **rejected** with exit code `2`; relative
 patterns, including ones that climb out with `..` (e.g. `../src`), are accepted.
@@ -312,6 +357,7 @@ sits under it, and otherwise shown as given.
 - `X012` non-`None` PEP 604 unions like `Type1 | Type2` instead of `Union[...]`
 - `X013` `subprocess.Popen`/`socket.socket` not used as a context manager
 - `X014` malformed or untracked `TODO`/`FIXME` comments
+- `X015` unused `# noqa` directives (a `# noqa` that suppressed nothing, or one naming an unknown code)
 
 ### `X003` circular imports
 
@@ -580,6 +626,7 @@ select = [
     "X012",
     "X013",
     "X014",
+    "X015",
 ]
 
 ignore = []
@@ -625,6 +672,7 @@ select = [
     "X012",
     "X013",
     "X014",
+    "X015",
 ]
 
 ignore = []

@@ -282,6 +282,175 @@ def test_cli_exclude_replaces_config_list(tmp_path, monkeypatch, capsys) -> None
     assert "pkg/sample.py" in capsys.readouterr().out
 
 
+def test_cli_per_file_ignores_from_config_suppresses(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'per_file_ignores = { "pkg/**" = ["X001"] }\n',
+        encoding="utf-8",
+    )
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "sample.py").write_text(
+        "def f():\n    try:\n        run()\n    except:\n        return 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    # The config table silences X001 under pkg/, so the run is clean.
+    assert main(["check", "--select", "X001", "."]) == 0
+    assert "no violations found" in capsys.readouterr().out
+
+
+def test_cli_per_file_ignores_flag_replaces_config_table(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'per_file_ignores = { "pkg/**" = ["X001"] }\n',
+        encoding="utf-8",
+    )
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "sample.py").write_text(
+        "def f():\n    try:\n        run()\n    except:\n        return 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    # The CLI flag REPLACES the file's table (C2); it targets a different glob,
+    # so pkg/ is no longer covered and X001 surfaces again.
+    assert main(["check", "--per-file-ignores", "vendor/**:X001", "--select", "X001", "."]) == 1
+    assert "pkg/sample.py" in capsys.readouterr().out
+
+
+def test_cli_per_file_ignores_malformed_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--per-file-ignores", "tests/**", "sample.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "malformed --per-file-ignores" in captured.err
+
+
+def test_cli_config_show_reports_per_file_ignores_origin(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text(
+        'per_file_ignores = { "tests/**" = ["x002"] }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    # File value renders as a JSON object with upper-cased codes and origin "file".
+    assert main(["config", "show", "--output-format", "json", "sample.py"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["settings"]["per_file_ignores"] == {
+        "origin": "file",
+        "value": {"tests/**": ["X002"]},
+    }
+    # A CLI flag overrides and is reported as origin "cli"; text renders compactly.
+    assert main(["config", "show", "--per-file-ignores", "scripts/*.py:X0", "sample.py"]) == 0
+    rows = _parse_show_table(capsys.readouterr().out)
+    assert rows["per_file_ignores"] == ("{scripts/*.py=[X0]}", "cli")
+
+
+_BARE_EXCEPT_SOURCE = "def f():\n    try:\n        run()\n    except:\n        return 1\n"
+
+
+def _write_bare_except_project(tmp_path):
+    """Create a project whose ``m.py`` has one X001 bare-except violation."""
+    (tmp_path / "m.py").write_text(_BARE_EXCEPT_SOURCE, encoding="utf-8")
+
+
+def test_cli_write_baseline_exits_zero_even_with_violations(tmp_path, monkeypatch, capsys) -> None:
+    _write_bare_except_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    # Violations exist, yet --write-baseline records them and exits 0 (C1).
+    assert main(["check", "--select", "X001", "--write-baseline", "baseline.json", "."]) == 0
+    out = capsys.readouterr().out
+    assert "Wrote 1 baseline entry to" in out
+    document = json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))
+    assert document["version"] == 1
+    assert len(document["entries"]) == 1
+
+
+def test_cli_baseline_suppresses_then_new_surfaces(tmp_path, monkeypatch, capsys) -> None:
+    _write_bare_except_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X001", "--write-baseline", "baseline.json", "."]) == 0
+    capsys.readouterr()
+    # Re-running against the baseline suppresses the recorded violation -> exit 0.
+    assert main(["check", "--select", "X001", "--baseline", "baseline.json", "."]) == 0
+    assert "no violations found" in capsys.readouterr().out
+    # Editing the flagged line re-surfaces it -> exit 1.
+    (tmp_path / "m.py").write_text(
+        "def f():\n    try:\n        run()\n    except:  # edited\n        return 1\n",
+        encoding="utf-8",
+    )
+    assert main(["check", "--select", "X001", "--baseline", "baseline.json", "."]) == 1
+    assert "X001" in capsys.readouterr().out
+
+
+def test_cli_write_baseline_ignores_existing_baseline(tmp_path, monkeypatch, capsys) -> None:
+    _write_bare_except_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X001", "--write-baseline", "first.json", "."]) == 0
+    capsys.readouterr()
+    # Even with --baseline suppressing the violation, --write-baseline records the
+    # full current set, so the new file still holds the entry.
+    assert main(["check", "--select", "X001", "--baseline", "first.json", "--write-baseline", "second.json", "."]) == 0
+    document = json.loads((tmp_path / "second.json").read_text(encoding="utf-8"))
+    assert len(document["entries"]) == 1
+
+
+def test_cli_baseline_malformed_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    _write_bare_except_project(tmp_path)
+    (tmp_path / "baseline.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X001", "--baseline", "baseline.json", "."]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "flakeforge:" in captured.err
+
+
+def test_cli_baseline_missing_file_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    _write_bare_except_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--select", "X001", "--baseline", "absent.json", "."]) == 2
+    assert "flakeforge:" in capsys.readouterr().err
+
+
+def test_cli_baseline_config_relative_resolution_regardless_of_cwd(tmp_path, monkeypatch, capsys) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "m.py").write_text(_BARE_EXCEPT_SOURCE, encoding="utf-8")
+    (project / "flakeforge.toml").write_text(
+        'select = ["X001"]\nbaseline = "baseline.json"\n',
+        encoding="utf-8",
+    )
+    # Record the baseline beside the config, then reference it config-relative.
+    monkeypatch.chdir(project)
+    assert main(["check", "--write-baseline", "baseline.json", "."]) == 0
+    capsys.readouterr()
+    # From an unrelated cwd, the config's base_dir-relative baseline still resolves.
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    monkeypatch.chdir(sibling)
+    assert main(["check", "--config", str(project / "flakeforge.toml"), str(project)]) == 0
+    assert "no violations found" in capsys.readouterr().out
+
+
+def test_cli_absolute_config_baseline_exits_2(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('baseline = "/tmp/baseline.json"\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "--config", "flakeforge.toml", "sample.py"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "baseline path '/tmp/baseline.json' must be relative" in captured.err
+
+
+def test_cli_config_show_reports_baseline_origin(tmp_path, monkeypatch, capsys) -> None:
+    (tmp_path / "flakeforge.toml").write_text('baseline = "ci/base.json"\n', encoding="utf-8")
+    (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert main(["config", "show", "sample.py"]) == 0
+    rows = _parse_show_table(capsys.readouterr().out)
+    assert rows["baseline"] == ("ci/base.json", "file")
+
+
 def test_cli_absolute_config_pattern_exits_error(tmp_path, monkeypatch, capsys) -> None:
     (tmp_path / "flakeforge.toml").write_text('include = ["/etc"]\n', encoding="utf-8")
     (tmp_path / "sample.py").write_text("x = 1\n", encoding="utf-8")
@@ -914,7 +1083,13 @@ def _default_config_mapping() -> dict:
     mapping = {}
     for key in CONFIG_KEYS:
         value = getattr(defaults, key)
-        mapping[key] = list(value) if isinstance(value, tuple) else value
+        if key == "per_file_ignores":
+            # A TOML table, not a flat array, so it round-trips as a dict.
+            mapping[key] = {glob: list(codes) for glob, codes in value}
+        elif isinstance(value, tuple):
+            mapping[key] = list(value)
+        else:
+            mapping[key] = value
     return mapping
 
 

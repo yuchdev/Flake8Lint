@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **New built-in `X015` for unused `# noqa` directives (enabled by default).** The
+  engine now reports `X015` for any `# noqa` that suppressed nothing on a run — a
+  bare `# noqa` where nothing on the line was suppressed, or a coded `# noqa: CODE`
+  whose code is unknown or matched no suppressed violation. A coded directive that
+  names a registered but currently *disabled* code (via `select` / `ignore`) is
+  **not** flagged, since another run — for example a CI `--select` subset — may
+  still use it; a *bare* `# noqa` names no codes and so can read as unused under a
+  narrow `select`. A violation dropped by `per_file_ignores` still counts as
+  covering the `# noqa` on its line. `X015` is emitted engine-side (not by an
+  AST rule), is not itself suppressible by `# noqa`, is skipped whenever `# noqa`
+  is inert for a file (`allow_noqa = false` or a `noqa_allowed` / `noqa_forbidden`
+  path policy), and still honours `select` / `ignore`, `per_file_ignores`, and the
+  baseline. Flake8 owns `# noqa`, so the Flake8 adapter never emits it. This is a
+  user-visible behavior change; opt out with `ignore = ["X015"]`.
+- **New baseline file for incremental adoption.** `--write-baseline PATH`
+  records every current violation's fingerprint (after select/ignore,
+  `per_file_ignores`, and `# noqa`) to a deterministic, byte-stable JSON file and
+  exits `0`. `--baseline PATH` (TOML key `baseline`, resolved relative to the
+  config file's directory, contract C6; absolute config values are rejected)
+  suppresses any violation recorded in it, so only *new* violations count toward
+  exit `1` (contract C1). The fingerprint is
+  `sha256(code + relative path + normalized source line text)` plus an occurrence
+  index (decision D2), so a suppression survives inserting lines above the
+  violation but re-surfaces when the flagged line is edited. A baseline entry that
+  no longer matches is reported as "fixed" — a count in text output and a list
+  under the additive `baseline` JSON key (`github`/`sarif` omit it) — and never
+  fails the run. A missing or malformed baseline exits `2`. `config show` reports
+  the `baseline` key with its origin.
+- **New `per_file_ignores` config key and `--per-file-ignores` flag.** A TOML
+  table mapping a path glob to rule-code prefixes skipped for matching files,
+  e.g. `per_file_ignores = { "tests/**" = ["X002"], "scripts/*.py" = ["X0"] }`.
+  The globs resolve against the config file's directory like `include`/`exclude`
+  (contract C6) — absolute globs are a config error (exit `2`) — and the codes
+  are validated like `ignore` (an unknown selector exits `2`; the legacy
+  `[tool.flake8_lint]` section stays lenient and drops unknowns with a warning).
+  The engine applies the suppression after rule execution and before `# noqa`
+  handling, base-relative and independent of the working directory. The
+  repeatable `--per-file-ignores "GLOB:CODE[,CODE]"` flag **replaces** the file's
+  whole table (contract C2); a malformed value exits `2`. `config show` reports
+  the key with its origin.
 - **New `flakeforge init` bootstrap command.** `flakeforge init [DIR]` writes a
   fully commented `DIR/flakeforge.toml` with every config key at its default (one
   comment line per key), and `flakeforge init --pyproject [DIR]` appends the same

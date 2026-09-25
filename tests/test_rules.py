@@ -26,6 +26,7 @@ VIOLATION_SAMPLES = [
     ("X012", "x012_union_type_violation.py"),
     ("X013", "x013_non_raii_resource_violation.py"),
     ("X014", "x014_todo_annotation_violation.py"),
+    ("X015", "x015_unused_noqa_violation.py"),
 ]
 
 # Clean/near-miss samples that are clean under the full default rule set.
@@ -44,6 +45,7 @@ FULLY_CLEAN_SAMPLES = [
     "x012_union_type_clean.py",
     "x013_non_raii_resource_clean.py",
     "x014_todo_annotation_clean.py",
+    "x015_unused_noqa_clean.py",
 ]
 
 

@@ -1,6 +1,6 @@
 # Custom Rules
 
-Use a custom rule when a project needs additional AST checks beyond the built-in X001–X014 catalogue.
+Use a custom rule when a project needs additional AST checks beyond the built-in X001–X015 catalogue.
 
 ## Supported public imports
 
@@ -81,7 +81,7 @@ Examples:
 - valid: `ACME001`, `SEC001`, `ARCH101`
 - invalid: `acme001`, `001`, `ACME01`
 
-Duplicate codes are errors, including collisions with built-in `X001`–`X014`.
+Duplicate codes are errors, including collisions with built-in `X001`–`X015`.
 
 ## Project-local registration
 
@@ -208,6 +208,8 @@ print("debug")  # noqa: ACME001
 ```
 
 Suppression still depends on global `allow_noqa` plus the `noqa_allowed` / `noqa_forbidden` path policy.
+
+The engine also owns the built-in `X015` "unused `# noqa`" check: it reports a `# noqa` (over any rule, built-in or custom) that suppressed nothing on the run, or one naming an unknown code. Because custom codes register in the same registry, a `# noqa: ACME001` that suppresses an `ACME001` violation counts as used, while a `# noqa: ACME999` naming an unregistered code is flagged. A directive naming a registered but currently disabled code (via `select` / `ignore`) is not flagged, so a subset run does not produce spurious `X015`. `X015` is engine-emitted rather than rule-owned, is not itself suppressible by `# noqa`, and honours the same `allow_noqa` / path policy: rules never implement any of this.
 
 ## Direct unit testing
 

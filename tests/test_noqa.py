@@ -4,6 +4,7 @@ from pathlib import Path
 
 from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_tree
 from flakeforge.config import LintConfig
+from flakeforge.registry import resolve_registry
 
 SOURCE = "\n".join(
     [
@@ -171,5 +172,125 @@ def test_custom_rule_code_is_suppressed_by_matching_noqa() -> None:
         source,
         config=LintConfig(select=("ORG",), noqa_allowed=("sample.py",)),
         registry=registry,
+    )
+    assert violations == ()
+
+
+# --------------------------------------------------------------------------- #
+# X015 unused-noqa detection (engine-emitted, 05.0/03)                     #
+# --------------------------------------------------------------------------- #
+
+_REG = resolve_registry(include_entry_points=False)
+
+
+def _check_x015(source: str, filename: str = "sample.py", **config_kwargs):
+    """Run the shared engine over *source* with the full built-in registry."""
+    return check_tree(
+        ast.parse(source, filename=filename),
+        filename,
+        source,
+        config=LintConfig(**config_kwargs),
+        registry=_REG,
+    )
+
+
+def test_x015_reports_bare_unused_noqa() -> None:
+    violations = _check_x015("x = 1  # noqa\n", select=("X015",))
+    # Position is the line of the comment and the column of the `#`.
+    assert [(v.code, v.lineno, v.col_offset) for v in violations] == [("X015", 1, 7)]
+
+
+def test_x015_reports_coded_unused_noqa_for_enabled_code() -> None:
+    violations = _check_x015("x = 1  # noqa: X001\n", select=("X001", "X015"))
+    assert [v.code for v in violations] == ["X015"]
+
+
+def test_x015_reports_unknown_code_noqa() -> None:
+    violations = _check_x015("x = 1  # noqa: ZZZ999\n", select=("X015",))
+    assert [v.code for v in violations] == ["X015"]
+
+
+def test_x015_not_reported_for_used_coded_noqa() -> None:
+    assert _check_x015(SOURCE, select=("X002", "X015")) == ()
+
+
+def test_x015_not_reported_for_used_bare_noqa() -> None:
+    source = SOURCE.replace("# noqa: X002", "# noqa")
+    assert _check_x015(source, select=("X002", "X015")) == ()
+
+
+def test_x015_not_reported_for_disabled_code_noqa() -> None:
+    # X002 is named but not enabled this run (the subset caveat): another run,
+    # e.g. CI's `--select` subset, may still honour it, so it is not X015.
+    assert _check_x015(SOURCE, select=("X015",)) == ()
+
+
+def test_x015_not_reported_when_per_file_ignores_cover_the_line() -> None:
+    # X002 is dropped by per_file_ignores *before* the noqa check, so the noqa
+    # never suppresses it directly. The per-file-ignored violation still counts
+    # as covering the noqa directive (X002) on its line (the seam), so no
+    # false X015 is raised.
+    violations = check_tree(
+        ast.parse(SOURCE, filename="sample.py"),
+        "sample.py",
+        SOURCE,
+        config=LintConfig(
+            select=("X002", "X015"),
+            per_file_ignores=(("sample.py", ("X002",)),),
+            base_dir=Path.cwd(),
+        ),
+        registry=_REG,
+    )
+    assert violations == ()
+
+
+def test_x015_suppressed_when_allow_noqa_false() -> None:
+    # With allow_noqa disabled every noqa directive is inert, so none is "unused".
+    assert _check_x015("x = 1  # noqa\n", select=("X015",), allow_noqa=False) == ()
+
+
+def test_x015_suppressed_by_noqa_forbidden_path_policy(tmp_path) -> None:
+    filename = str(tmp_path / "sample.py")
+    source = "x = 1  # noqa\n"
+    violations = check_tree(
+        ast.parse(source, filename=filename),
+        filename,
+        source,
+        config=LintConfig(select=("X015",), noqa_forbidden=("sample.py",), base_dir=tmp_path),
+        registry=_REG,
+    )
+    assert violations == ()
+
+
+def test_x015_is_not_self_suppressible() -> None:
+    # A noqa directive naming X015 cannot silence the very X015 it would produce.
+    violations = _check_x015("x = 1  # noqa: X015\n", select=("X015",))
+    assert [v.code for v in violations] == ["X015"]
+
+
+def test_x015_respects_ignore() -> None:
+    assert _check_x015("x = 1  # noqa\n", ignore=("X015",)) == ()
+
+
+def test_x015_not_emitted_when_not_selected() -> None:
+    assert _check_x015("x = 1  # noqa\n", select=("X001",)) == ()
+
+
+def test_x015_enabled_by_default() -> None:
+    assert [v.code for v in _check_x015("x = 1  # noqa\n")] == ["X015"]
+
+
+def test_x015_can_be_dropped_by_per_file_ignores() -> None:
+    # An X015 finding is itself subject to per_file_ignores like any other code.
+    violations = check_tree(
+        ast.parse("x = 1  # noqa\n", filename="sample.py"),
+        "sample.py",
+        "x = 1  # noqa\n",
+        config=LintConfig(
+            select=("X015",),
+            per_file_ignores=(("sample.py", ("X015",)),),
+            base_dir=Path.cwd(),
+        ),
+        registry=_REG,
     )
     assert violations == ()

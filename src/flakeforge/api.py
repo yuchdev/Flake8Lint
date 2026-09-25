@@ -12,6 +12,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional, Protocol, Union
 
+from . import baseline as baseline_mod
+from .baseline import BaselineEntry
 from .config import LintConfig, validate_config
 from .discovery import discover_python_files, path_matches_any
 from .registry import RuleRegistry, resolve_registry
@@ -19,6 +21,12 @@ from .registry import RuleRegistry, resolve_registry
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
 EXIT_ERROR = 2
+
+UNUSED_NOQA_CODE = "X015"
+"""Built-in code the engine emits for a ``# noqa`` directive that suppressed nothing."""
+
+UNUSED_NOQA_MESSAGE = "Unused `# noqa` directive; remove it or the code it no longer suppresses."
+"""Static X015 message. Deliberately names no user code or source text (security)."""
 
 
 @dataclass(frozen=True)
@@ -51,11 +59,21 @@ class LintResult:
         second registry lookup; defaults to empty for hand-built results. It
         is not part of the base JSON output, but supplies the per-code
         descriptions when statistics are requested.
+    :ivar baseline_fixed: Baseline entries that matched nothing on this run
+        ("fixed"), sorted, empty unless a baseline was applied. The engine never
+        fails a run over these; text output shows their count and JSON lists them
+        (additive keys), while ``github``/``sarif`` omit them.
+    :ivar fingerprints: One :class:`~flakeforge.baseline.BaselineEntry` per
+        reported violation (before any baseline suppression), in C9 order. This
+        is what ``--write-baseline`` persists; defaults to empty for hand-built
+        results.
     """
 
     violations: tuple[RuleViolation, ...]
     files_checked: int
     registered_rules: tuple[tuple[str, str], ...] = ()
+    baseline_fixed: tuple[BaselineEntry, ...] = ()
+    fingerprints: tuple[BaselineEntry, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -105,11 +123,18 @@ def check_tree(
     validate_selectors: bool = True,
     config: Optional[LintConfig] = None,
     registry=None,
+    emit_unused_noqa: bool = True,
 ) -> tuple[RuleViolation, ...]:
     """Run the resolved rule registry over a parsed module.
 
     Callers may pass a pre-resolved *registry* to control provider loading and
     avoid repeated discovery work across multiple files.
+
+    :param emit_unused_noqa: When true (the default), the engine additionally
+        emits the built-in :data:`UNUSED_NOQA_CODE` (X015) for every ``# noqa``
+        directive that suppressed nothing on this run. The Flake8 adapter passes
+        ``False`` because Flake8 owns ``# noqa`` there; see
+        :func:`_unused_noqa_violations` for the full semantics.
     """
 
     effective_config = config or LintConfig()
@@ -123,6 +148,11 @@ def check_tree(
     )
     context = RuleContext(tree=tree, filename=filename, source=source)
     violations: list[RuleViolation] = []
+    # Codes covered (suppressed by a noqa directive or dropped by
+    # ``per_file_ignores``) per source line, so X015 can tell a used directive
+    # from an unused one. A per-file-ignored violation counts as covering the
+    # directive on its line (see the seam in :func:`_is_per_file_ignored`).
+    covered_by_line: dict[int, set[str]] = {}
 
     for registration in effective_registry.enabled_rules():
         if not _is_rule_enabled(registration.code, validated_config):
@@ -140,14 +170,29 @@ def check_tree(
             provider = registration.provider or "<unknown provider>"
             raise RuleExecutionError(f"Rule {registration.code} from {provider} failed: {exc}") from exc
         for violation in emitted:
+            if _is_per_file_ignored(violation, validated_config):
+                covered_by_line.setdefault(violation.lineno, set()).add(violation.code)
+                continue
             if _is_noqa_suppressed(
                 violation,
                 context.source,
                 validated_config,
                 apply_noqa=apply_noqa,
             ):
+                covered_by_line.setdefault(violation.lineno, set()).add(violation.code)
                 continue
             violations.append(violation)
+
+    if emit_unused_noqa:
+        violations.extend(
+            _unused_noqa_violations(
+                context,
+                validated_config,
+                effective_registry,
+                covered_by_line,
+                apply_noqa=apply_noqa,
+            )
+        )
 
     return tuple(violations)
 
@@ -248,20 +293,112 @@ def lint_paths(
         files = discover_python_files(target_paths, config=validated_config)
     root_dir = (validated_config.base_dir or Path.cwd()).resolve()
     violations: list[RuleViolation] = []
+    source_lines_by_display: dict[str, list[str]] = {}
     for file_path in files:
         display_name = _display_filename(file_path, root_dir)
-        file_violations = check_file(
-            file_path,
+        source = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(file_path))
+        file_violations = check_tree(
+            tree,
+            str(file_path),
+            source,
             config=validated_config,
             registry=effective_registry,
         )
+        if file_violations:
+            source_lines_by_display[display_name] = source.splitlines()
         violations.extend(replace(violation, filename=display_name) for violation in file_violations)
     registered_rules = tuple((registration.code, registration.description) for registration in effective_registry.all())
+    reported, baseline_fixed, fingerprints = _apply_baseline(violations, source_lines_by_display, validated_config)
     return LintResult(
-        violations=tuple(violations),
+        violations=reported,
         files_checked=len(files),
         registered_rules=registered_rules,
+        baseline_fixed=baseline_fixed,
+        fingerprints=fingerprints,
     )
+
+
+def _apply_baseline(
+    violations: Sequence[RuleViolation],
+    source_lines_by_display: dict[str, list[str]],
+    config: LintConfig,
+) -> tuple[tuple[RuleViolation, ...], tuple[BaselineEntry, ...], tuple[BaselineEntry, ...]]:
+    """Fingerprint *violations* and drop any already recorded in the baseline.
+
+    Suppression is engine-owned (repo convention): rules never see baselines. It
+    runs last -- after select/ignore, ``per_file_ignores`` and ``# noqa`` -- so a
+    baseline only ever drops a violation that would otherwise be reported (plan
+    contract C1). Violations are fingerprinted in the deterministic C9 order so
+    occurrence indices are stable (decision D2).
+
+    :param violations: The reported violations, with base-relative display names.
+    :param source_lines_by_display: Split source lines keyed by display filename,
+        used to fingerprint each violation's source line.
+    :param config: The validated effective configuration.
+    :returns: ``(reported, fixed, fingerprints)`` where *reported* is the
+        surviving violations, *fixed* is the sorted baseline entries that matched
+        nothing, and *fingerprints* is one entry per reported violation before
+        suppression (what ``--write-baseline`` persists).
+    """
+    ordered = _sorted_violations(violations)
+    fingerprints = [
+        baseline_mod.compute_fingerprint(
+            violation.code,
+            violation.filename,
+            _violation_line_text(violation, source_lines_by_display),
+        )
+        for violation in ordered
+    ]
+    entries = baseline_mod.assign_entries(fingerprints)
+    all_entries = tuple(entries)
+
+    baseline_path = _resolve_baseline_path(config)
+    if baseline_path is None:
+        return tuple(violations), (), all_entries
+
+    known = baseline_mod.load_baseline(baseline_path)
+    reported: list[RuleViolation] = []
+    matched: set[BaselineEntry] = set()
+    for violation, entry in zip(ordered, entries, strict=True):
+        if entry in known:
+            matched.add(entry)
+        else:
+            reported.append(violation)
+    fixed = tuple(sorted(known - matched))
+    return tuple(reported), fixed, all_entries
+
+
+def _violation_line_text(
+    violation: RuleViolation,
+    source_lines_by_display: dict[str, list[str]],
+) -> str:
+    """Return the source line *violation* points at, or ``""`` when unavailable."""
+    lines = source_lines_by_display.get(violation.filename)
+    if lines is None:
+        return ""
+    index = violation.lineno - 1
+    if 0 <= index < len(lines):
+        return lines[index]
+    return ""
+
+
+def _resolve_baseline_path(config: LintConfig) -> Optional[Path]:
+    """Resolve the effective baseline path, or ``None`` when none is configured.
+
+    An empty ``baseline`` means "no baseline". A config-file value is relative and
+    resolves against ``base_dir`` (plan contract C6); the CLI resolves its
+    ``--baseline`` to an absolute path before merging, so an absolute value is
+    used verbatim and stays cwd-relative in origin.
+    """
+    raw = config.baseline
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate
+    base = config.base_dir or Path.cwd()
+    return base / candidate
 
 
 def format_text(result: LintResult, *, statistics: bool = False) -> str:
@@ -275,14 +412,32 @@ def format_text(result: LintResult, *, statistics: bool = False) -> str:
     :returns: The rendered text report.
     """
     if result.ok:
-        return f"Checked {result.files_checked} file(s); no violations found."
+        return _append_fixed_text(f"Checked {result.files_checked} file(s); no violations found.", result)
     body = "\n".join(
         f"{violation.filename}:{violation.lineno}:{violation.col_offset}: {violation.code} {violation.message}"
         for violation in _sorted_violations(result.violations)
     )
-    if not statistics:
-        return body
-    return f"{body}\n\n{_format_statistics_text(result)}"
+    if statistics:
+        body = f"{body}\n\n{_format_statistics_text(result)}"
+    return _append_fixed_text(body, result)
+
+
+def _append_fixed_text(report: str, result: LintResult) -> str:
+    """Append the "fixed" baseline-entry count line to *report* when any exist.
+
+    A baselined violation that matched nothing this run is "fixed" and can be
+    pruned. This is informational only -- it never changes the exit code (the run
+    stays clean) -- so the line is appended and omitted entirely when there is
+    nothing to report, keeping baseline-free output byte-identical.
+    """
+    count = len(result.baseline_fixed)
+    if count == 0:
+        return report
+    if count == 1:
+        note = "1 baseline entry no longer matches anything (fixed); remove it from the baseline."
+    else:
+        note = f"{count} baseline entries no longer match anything (fixed); remove them from the baseline."
+    return f"{report}\n\n{note}"
 
 
 def format_json(result: LintResult, *, statistics: bool = False) -> str:
@@ -299,6 +454,11 @@ def format_json(result: LintResult, *, statistics: bool = False) -> str:
         ``schema_version`` stays ``1`` (an additive optional key cannot break a
         consumer that ignores unknown keys); an empty object is emitted when
         there are no violations.
+
+        A separate additive ``baseline`` object (``{"fixed": [...]}``) is emitted
+        only when a baseline was applied and left stale ("fixed") entries; it too
+        keeps ``schema_version`` at ``1`` and is absent otherwise. The
+        ``github``/``sarif`` formats omit fixed entries entirely.
     :returns: The rendered JSON document.
     """
     payload: dict[str, object] = {
@@ -310,6 +470,12 @@ def format_json(result: LintResult, *, statistics: bool = False) -> str:
     if statistics:
         payload["statistics"] = {
             code: {"count": count, "description": description} for code, count, description in _statistics_rows(result)
+        }
+    if result.baseline_fixed:
+        payload["baseline"] = {
+            "fixed": [
+                {"fingerprint": entry.fingerprint, "occurrence": entry.occurrence} for entry in result.baseline_fixed
+            ]
         }
     return json.dumps(payload, indent=2, sort_keys=True)
 
@@ -530,6 +696,43 @@ def _is_rule_enabled(code: str, config: LintConfig) -> bool:
     return True
 
 
+def _is_per_file_ignored(violation: RuleViolation, config: LintConfig) -> bool:
+    """Return whether *violation* is silenced by a ``per_file_ignores`` entry.
+
+    Suppression is engine-owned (repo convention): rules never see per-file
+    ignores. A violation is dropped when its file matches an entry's glob and its
+    code starts with one of that entry's prefixes. Globs are matched
+    base-relative through :func:`discovery.path_matches_any` with the config's
+    ``base_dir`` (plan contract C6), the same anchoring ``include``/``exclude``
+    and the ``# noqa`` path policy use, so the result is independent of the
+    process cwd. This runs *after* rule execution and *before* ``# noqa``
+    handling.
+
+    X015 seam (unused-``# noqa``, 05.0/03): because this predicate fires before
+    :func:`_is_noqa_suppressed`, a per-file-ignored violation never reaches the
+    noqa check, so a ``# noqa`` on that line would look unused. A future X015 pass
+    must therefore treat a per-file-ignored violation as still *covering* any
+    ``# noqa`` on its line -- i.e. compute "unused noqa" against the union of
+    noqa-suppressed and per-file-ignored violations, not just the former.
+    Keeping this as a separate, side-effect-free predicate (rather than folding
+    the code prefixes into the noqa path) preserves that seam without building
+    X015 now.
+
+    :param violation: The candidate violation.
+    :param config: The validated effective configuration.
+    :returns: ``True`` when a matching entry silences *violation*.
+    """
+    if not config.per_file_ignores:
+        return False
+    root_dir = config.base_dir or Path.cwd()
+    for glob, codes in config.per_file_ignores:
+        if not codes:
+            continue
+        if path_matches_any(violation.filename, (glob,), root_dir) and _matches_code_prefix(violation.code, codes):
+            return True
+    return False
+
+
 def _is_noqa_suppressed(
     violation: RuleViolation,
     source: Optional[str],
@@ -575,6 +778,18 @@ def _parse_noqa_codes(line: str) -> Optional[frozenset[str]]:
     comment = _extract_comment(line)
     if comment is None:
         return None
+    return _noqa_codes_from_comment(comment)
+
+
+def _noqa_codes_from_comment(comment: str) -> Optional[frozenset[str]]:
+    """Parse the ``noqa`` codes out of an already-extracted *comment* body.
+
+    *comment* is the trailing comment text with its leading ``#`` and
+    surrounding whitespace removed (see :func:`_extract_comment`).
+
+    :returns: ``None`` when the comment is not a ``noqa`` directive, an empty set
+        for a bare ``# noqa`` (suppress everything), or the specific codes.
+    """
     lowered = comment.lower()
     if not lowered.startswith("noqa"):
         return None
@@ -589,6 +804,126 @@ def _parse_noqa_codes(line: str) -> Optional[frozenset[str]]:
             continue
         cleaned_codes.append(cleaned.split()[0].upper())
     return frozenset(cleaned_codes)
+
+
+def _iter_noqa_directives(source: str) -> Iterable[tuple[int, int, frozenset[str]]]:
+    """Yield ``(lineno, col_offset, codes)`` for every ``# noqa`` in *source*.
+
+    *lineno* is 1-based and *col_offset* is the 0-based column of the ``#`` that
+    opens the comment (the X015 report position). *codes* is the parsed
+    directive: an empty frozenset for a bare ``# noqa``, otherwise the named
+    codes. Tokenising is done over the whole module so ``#`` inside string
+    literals never registers as a comment.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except tokenize.TokenError:
+        # A module that cannot be fully tokenised (e.g. an unterminated string)
+        # contributes no directives; the AST was already parsed by the caller,
+        # so reaching here is defensive.
+        tokens = []
+    for token in tokens:
+        if token.type != tokenize.COMMENT:
+            continue
+        comment = token.string.removeprefix("#").strip()
+        codes = _noqa_codes_from_comment(comment)
+        if codes is None:
+            continue
+        yield token.start[0], token.start[1], codes
+
+
+def _unused_noqa_violations(
+    context: RuleContext,
+    config: LintConfig,
+    registry: RuleRegistry,
+    covered_by_line: dict[int, set[str]],
+    *,
+    apply_noqa: bool,
+) -> list[RuleViolation]:
+    """Emit X015 for every ``# noqa`` directive that suppressed nothing.
+
+    Suppression and ``# noqa`` handling are engine-owned (repo convention), so
+    X015 is emitted here rather than by an AST-walking rule. A directive is
+    unused when:
+
+    * it is bare (``# noqa``) and nothing on its line was covered -- neither
+      suppressed by that ``# noqa`` nor dropped by ``per_file_ignores``; or
+    * it is coded (``# noqa: CODE, ...``) and at least one listed entry is unused
+      -- an *unregistered* code (always unused) or a registered, currently
+      *enabled* code that matched nothing covered on its line. A coded entry that
+      is registered but disabled by ``select`` / ``ignore`` is skipped, never
+      reported, because it may be honoured by another run (e.g. a CI ``--select``
+      subset). This is the documented subset caveat: a *bare* ``# noqa`` names no
+      codes, so it cannot be exempted this way and may read as unused under a
+      narrow ``select``.
+
+    X015 is not itself suppressible by ``# noqa`` (that would invite a
+    self-reference loop), but it still honours ``select`` / ``ignore`` and
+    ``per_file_ignores`` here (baseline runs later, in :func:`lint_paths`). It is
+    skipped entirely whenever ``# noqa`` is inert for this file -- ``apply_noqa``
+    off, ``allow_noqa`` false, absent source, or a ``noqa_allowed`` /
+    ``noqa_forbidden`` path policy that forbids ``# noqa`` -- since a directive
+    that is ignored by policy cannot be called unused.
+
+    :param context: The module analysis context.
+    :param config: The validated effective configuration.
+    :param registry: The resolved registry, for the set of known codes.
+    :param covered_by_line: Codes covered per source line during rule execution.
+    :param apply_noqa: Whether ``# noqa`` handling is active for this run.
+    :returns: The X015 violations to report, in source order.
+    """
+    if not apply_noqa or not config.allow_noqa or context.source is None:
+        return []
+    if not _path_allows_noqa(context.filename, config):
+        return []
+    if not _is_rule_enabled(UNUSED_NOQA_CODE, config):
+        return []
+
+    known_codes = registry.known_codes()
+    results: list[RuleViolation] = []
+    for lineno, col_offset, codes in _iter_noqa_directives(context.source):
+        covered = covered_by_line.get(lineno, set())
+        if not _noqa_directive_is_unused(codes, covered, config, known_codes):
+            continue
+        violation = RuleViolation(
+            filename=context.filename,
+            lineno=lineno,
+            col_offset=col_offset,
+            code=UNUSED_NOQA_CODE,
+            message=UNUSED_NOQA_MESSAGE,
+        )
+        if _is_per_file_ignored(violation, config):
+            continue
+        results.append(violation)
+    return results
+
+
+def _noqa_directive_is_unused(
+    codes: frozenset[str],
+    covered: set[str],
+    config: LintConfig,
+    known_codes: Sequence[str],
+) -> bool:
+    """Return whether the parsed ``# noqa`` *codes* suppressed nothing usable.
+
+    See :func:`_unused_noqa_violations` for the full contract. A bare directive
+    (empty *codes*) is unused when nothing on its line was covered. A coded
+    directive is unused when any listed entry is unregistered, or is registered
+    and currently enabled yet matched nothing in *covered*.
+    """
+    if not codes:
+        return not covered
+    for code in codes:
+        matched_known = tuple(known for known in known_codes if known.startswith(code))
+        if not matched_known:
+            # Unknown / unregistered code: it can never suppress anything.
+            return True
+        if not any(_is_rule_enabled(known, config) for known in matched_known):
+            # Registered but disabled this run; another run may still use it.
+            continue
+        if not any(covered_code.startswith(code) for covered_code in covered):
+            return True
+    return False
 
 
 def _extract_comment(line: str) -> Optional[str]:

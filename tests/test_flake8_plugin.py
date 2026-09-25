@@ -148,3 +148,24 @@ def test_flake8_plugin_uses_cached_registry(monkeypatch, tmp_path) -> None:
     tree = ast.parse(sample.read_text(encoding="utf-8"), filename=str(sample))
     assert list(ProjectRulesPlugin(tree, str(sample)).run())
     assert list(ProjectRulesPlugin(tree, str(sample)).run())
+
+
+def test_flake8_plugin_does_not_emit_unused_noqa(tmp_path) -> None:
+    ProjectRulesPlugin.parse_options(
+        SimpleNamespace(
+            select=(),
+            extend_select=(),
+            ignore=(),
+            extend_ignore=(),
+            disable_noqa=False,
+            flakeforge_no_noqa=False,
+        )
+    )
+    sample = tmp_path / "sample.py"
+    # A noqa directive that suppresses nothing would be X015 in the standalone
+    # but Flake8 owns noqa in the adapter, so the plugin must never emit X015.
+    sample.write_text("x = 1  # noqa\n", encoding="utf-8")
+    tree = ast.parse(sample.read_text(encoding="utf-8"), filename=str(sample))
+    results = list(ProjectRulesPlugin(tree, str(sample)).run())
+    assert results == []
+    assert all(not message.startswith("X015") for _, _, message, _ in results)

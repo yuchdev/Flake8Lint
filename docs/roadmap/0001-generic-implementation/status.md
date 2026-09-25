@@ -10,7 +10,7 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 | 02.0 | Tool-Mode Config Surfaces        | ✅ Complete    | `test_config.py`, `test_config_precedence.py`, `test_cli.py`, `test_api.py`, `test_discovery.py`, `test_noqa.py`, CI `wheel-smoke` |
 | 03.0 | Config Introspection & Bootstrap | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, CI `wheel-smoke` |
 | 04.0 | CI Output Formats                | ✅ Complete    | `test_api.py`, `test_cli.py`, `test_config.py`, `tests/golden/sarif_basic.json` |
-| 05.0 | Incremental Adoption             | ⬜ Not started | -     |
+| 05.0 | Incremental Adoption             | 🔶 In progress (2/3 subtasks) | -     |
 | 06.0 | Scale & Distribution             | ⬜ Not started | -     |
 
 **Legend:** ✅ Complete · 🔶 In progress / partial · ⬜ Not started
@@ -21,7 +21,12 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   (with its illustrative `01.0-hello-world-endpoint` task) to `0001-generic-implementation`.
   The template task was removed. It described a `GET /health` endpoint that doesn't apply
   to a lint CLI.
-- Open: D1 (unused-`noqa` code) and D2 (baseline fingerprint). See
+- 2026-09-24 - **D1 ratified (user):** an unused `# noqa` is reported as a new built-in code
+  **`X015`**, emitted by the engine. Codes are append-only, so this is no renumbering. It
+  requires the full built-in-rule set of changes (registry, `rules.py`/engine, tests, sample,
+  README/docs).
+- 2026-09-24 - **D2 ratified (user):** the baseline fingerprint is `sha256(code + relative path +
+  normalized source line text)` plus an occurrence index. See
   [plan.md](plan.md#open-decisions-ratify-before-the-dependent-subtask-starts).
 - 2026-09-24 - 01.0/01: a nonexistent path argument exited `0` on the baseline, although the
   spec said "still exit 2". Ruling (user): exit `2` with `flakeforge: path does not exist: ...`

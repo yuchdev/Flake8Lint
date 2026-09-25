@@ -6,7 +6,7 @@ This file provides guidance to Junie when working with code in this repository.
 
 `flakeforge` is a standalone, reusable AST-based Python lint rule engine. It ships four ways to run the same core:
 a standalone CLI (`flakeforge check`), a Python API, a thin Flake8 plugin adapter, and an opt-in pytest helper.
-Built-in rules are `X001`-`X014` (all enabled by default); projects can add their own codes via project-local
+Built-in rules are `X001`-`X015` (all enabled by default); projects can add their own codes via project-local
 rule modules or installed `flakeforge.rules` entry points.
 
 ## Commands
@@ -51,7 +51,7 @@ else (config/discovery, the CLI/API, and the Flake8/pytest adapters) is a thin l
   extensions. `resolve_registry()` builds one resolved registry from: built-ins → project-local `rule_modules`
   → installed `flakeforge.rules` entry points (unless disabled). Provider loading is deterministic; duplicate
   or malformed codes fail fast rather than being silently dropped.
-- **`rules.py`** — the X001-X014 built-in rule implementations, each an AST-walking `check(context)` callable.
+- **`rules.py`** — the X001-X015 built-in rule implementations, each an AST-walking `check(context)` callable.
 - **`config.py`** — typed config parsing and discovery precedence: `--config PATH` > `flakeforge.toml` >
   `pyproject.toml [tool.flakeforge]` > legacy `pyproject.toml [tool.flake8_lint]` > defaults. Does not
   print warnings itself — that's left to callers (CLI decides how to surface them).

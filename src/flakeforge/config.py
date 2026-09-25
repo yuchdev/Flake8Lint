@@ -28,11 +28,18 @@ class LintConfig:
     :ivar allow_noqa: Whether ``# noqa`` suppression is honoured.
     :ivar noqa_allowed: Path patterns where ``# noqa`` is permitted (file-only).
     :ivar noqa_forbidden: Path patterns where ``# noqa`` is rejected (file-only).
+    :ivar per_file_ignores: Per-file rule suppressions as ``(glob, codes)`` pairs
+        in declared order; each glob resolves against ``base_dir`` (C6) and each
+        code entry is an upper-cased rule-code prefix skipped for matching files.
     :ivar rule_modules: Importable modules contributing extra rules.
     :ivar rule_plugins: Whether installed ``flakeforge.rules`` entry-point
         providers are loaded.
     :ivar output_format: Name of the formatter used to render results.
     :ivar statistics: Whether to append a per-code count summary to the output.
+    :ivar baseline: Path to a baseline file whose recorded fingerprints are
+        suppressed; empty means none. A config-file value is relative to
+        ``base_dir`` (C6, absolute values are rejected); the CLI resolves
+        ``--baseline`` to an absolute path before it reaches here.
     :ivar base_dir: Directory patterns are resolved against; excluded from equality.
     :ivar config_path: Path the config was loaded from; excluded from equality.
     :ivar legacy_mode: Whether a deprecated config section was used.
@@ -46,10 +53,12 @@ class LintConfig:
     allow_noqa: bool = True
     noqa_allowed: tuple[str, ...] = ()
     noqa_forbidden: tuple[str, ...] = ()
+    per_file_ignores: tuple[tuple[str, tuple[str, ...]], ...] = ()
     rule_modules: tuple[str, ...] = ()
     rule_plugins: bool = True
     output_format: str = "text"
     statistics: bool = False
+    baseline: str = ""
     base_dir: Optional[Path] = field(default=None, compare=False)
     config_path: Optional[Path] = field(default=None, compare=False)
     legacy_mode: bool = field(default=False, compare=False)
@@ -138,10 +147,12 @@ class LintConfig:
         allow_noqa: Optional[bool] = None,
         noqa_allowed: Optional[tuple[str, ...]] = None,
         noqa_forbidden: Optional[tuple[str, ...]] = None,
+        per_file_ignores: Optional[tuple[tuple[str, tuple[str, ...]], ...]] = None,
         rule_modules: Optional[tuple[str, ...]] = None,
         rule_plugins: Optional[bool] = None,
         output_format: Optional[str] = None,
         statistics: Optional[bool] = None,
+        baseline: Optional[str] = None,
         warnings: Optional[tuple[str, ...]] = None,
     ) -> LintConfig:
         """Return a copy with the supplied (non-``None``) fields overridden.
@@ -160,10 +171,12 @@ class LintConfig:
             allow_noqa=self.allow_noqa if allow_noqa is None else allow_noqa,
             noqa_allowed=self.noqa_allowed if noqa_allowed is None else noqa_allowed,
             noqa_forbidden=(self.noqa_forbidden if noqa_forbidden is None else noqa_forbidden),
+            per_file_ignores=(self.per_file_ignores if per_file_ignores is None else per_file_ignores),
             rule_modules=self.rule_modules if rule_modules is None else rule_modules,
             rule_plugins=self.rule_plugins if rule_plugins is None else rule_plugins,
             output_format=self.output_format if output_format is None else output_format,
             statistics=self.statistics if statistics is None else statistics,
+            baseline=self.baseline if baseline is None else baseline,
             warnings=self.warnings if warnings is None else warnings,
         )
 
@@ -379,7 +392,18 @@ def validate_config(config: LintConfig, known_codes: Sequence[str]) -> LintConfi
         legacy_mode=config.legacy_mode,
         warnings=warnings,
     )
-    return config.merge(select=select, ignore=ignore, warnings=tuple(warnings))
+    per_file_ignores = _validate_per_file_ignores(
+        config.per_file_ignores,
+        known_codes=normalized_known,
+        legacy_mode=config.legacy_mode,
+        warnings=warnings,
+    )
+    return config.merge(
+        select=select,
+        ignore=ignore,
+        per_file_ignores=per_file_ignores,
+        warnings=tuple(warnings),
+    )
 
 
 def _load_pyproject(path: Path, *, data: Optional[dict[str, Any]] = None) -> Optional[LintConfig]:
@@ -466,6 +490,35 @@ def _validate_rule_selectors(
     return tuple(valid)
 
 
+def _validate_per_file_ignores(
+    entries: Sequence[tuple[str, tuple[str, ...]]],
+    *,
+    known_codes: Sequence[str],
+    legacy_mode: bool,
+    warnings: list[str],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Validate each ``per_file_ignores`` code list against *known_codes*.
+
+    Each glob's codes are checked exactly like ``ignore`` (via
+    :func:`_validate_rule_selectors`): an unknown selector raises outside legacy
+    mode and is dropped with a warning inside it. The globs themselves are left
+    untouched -- absoluteness is already rejected at coercion time. Glob order is
+    preserved; an entry whose codes all drop in legacy mode is kept with an empty
+    code tuple (it simply matches nothing).
+    """
+    validated: list[tuple[str, tuple[str, ...]]] = []
+    for glob, codes in entries:
+        valid_codes = _validate_rule_selectors(
+            codes,
+            known_codes=known_codes,
+            field_name="per_file_ignores",
+            legacy_mode=legacy_mode,
+            warnings=warnings,
+        )
+        validated.append((glob, valid_codes))
+    return tuple(validated)
+
+
 def _as_str_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
     """Coerce a TOML array into a tuple of strings, validating element types."""
     if value is None:
@@ -513,6 +566,46 @@ def _as_path_pattern_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
     return patterns
 
 
+def _as_per_file_ignores(value: Any, *, field_name: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Coerce a TOML table of ``glob -> [code, ...]`` into ordered pairs.
+
+    ``per_file_ignores`` maps a path glob to the rule-code prefixes suppressed
+    for files matching it. The globs are path patterns like ``include`` and so
+    resolve against the config file directory (``base_dir``, plan contract C6);
+    an absolute or anchored glob is rejected here through the shared
+    :func:`_is_absolute_pattern`, in one place for both config surfaces (and the
+    lenient legacy section, since this is a value error, not an unknown key).
+    Codes are upper-cased like ``ignore`` but are *not* validated against the
+    registry here -- :func:`validate_config` does that once the rule set is
+    known. The result is a hashable tuple of ``(glob, codes)`` pairs preserving
+    the table's declared order, so it is safe on the frozen :class:`LintConfig`.
+
+    :param value: The raw TOML value for *field_name* (a table, or ``None``).
+    :param field_name: The config key, used in error messages.
+    :returns: The ordered ``(glob, codes)`` pairs.
+    :raises ConfigValidationError: If *value* is not a table, a glob is not a
+        string or is absolute, or a code list is not an array of strings.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise ConfigValidationError(f"{field_name} must be a table mapping globs to code lists")
+    entries: list[tuple[str, tuple[str, ...]]] = []
+    for glob, codes in value.items():
+        if not isinstance(glob, str):
+            raise ConfigValidationError(f"{field_name} globs must be strings")
+        if _is_absolute_pattern(glob):
+            raise ConfigValidationError(
+                f"{field_name} pattern {glob!r} must be relative to the config file directory, not absolute"
+            )
+        upper = _as_upper_tuple(codes, field_name=field_name)
+        if any(not code for code in upper):
+            # An empty prefix matches every code and would silence the whole file.
+            raise ConfigValidationError(f"{field_name} codes for {glob!r} must not be empty strings")
+        entries.append((glob, upper))
+    return tuple(entries)
+
+
 def _is_absolute_pattern(pattern: str) -> bool:
     """Return whether *pattern* is anchored outside the config file directory.
 
@@ -523,6 +616,32 @@ def _is_absolute_pattern(pattern: str) -> bool:
     literal segment because patterns are never user-expanded.
     """
     return bool(PureWindowsPath(pattern).anchor) or PurePosixPath(pattern).is_absolute()
+
+
+def _as_config_path(value: Any, *, field_name: str) -> str:
+    """Coerce a single optional config path string, rejecting absolute ones.
+
+    Like the path-pattern keys, a config-file ``baseline`` resolves against the
+    config file's directory (``base_dir``, plan contract C6), so an absolute value
+    would silently escape that anchor and is rejected here (one place, both config
+    surfaces including the lenient legacy section, since this is a value error).
+    An empty string means "no baseline".
+
+    :param value: The raw TOML value for *field_name*.
+    :param field_name: The config key, used in error messages.
+    :returns: The validated relative path string (``""`` when unset).
+    :raises ConfigValidationError: If *value* is not a string, or is an absolute
+        path.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ConfigValidationError(f"{field_name} must be a string")
+    if value and _is_absolute_pattern(value):
+        raise ConfigValidationError(
+            f"{field_name} path {value!r} must be relative to the config file directory, not absolute"
+        )
+    return value
 
 
 def _normalize_codes(values: tuple[str, ...]) -> tuple[str, ...]:
@@ -557,10 +676,12 @@ _CONFIG_SCHEMA: dict[str, tuple[Callable[..., Any], Any]] = {
     "allow_noqa": (_as_bool, True),
     "noqa_allowed": (_as_path_pattern_tuple, ()),
     "noqa_forbidden": (_as_path_pattern_tuple, ()),
+    "per_file_ignores": (_as_per_file_ignores, {}),
     "rule_modules": (_as_str_tuple, ()),
     "rule_plugins": (_as_bool, True),
     "output_format": (_as_str, "text"),
     "statistics": (_as_bool, False),
+    "baseline": (_as_config_path, ""),
 }
 
 #: The config-surface keys in schema (declaration) order. Introspection callers
@@ -598,6 +719,9 @@ noqa_allowed = []
 # Path patterns (relative to this file) where `# noqa` is rejected.
 noqa_forbidden = []
 
+# Per-file ignores: a glob (relative to this file) mapped to rule-code prefixes to skip.
+per_file_ignores = {}
+
 # Importable modules contributing extra rules.
 rule_modules = []
 
@@ -609,6 +733,9 @@ output_format = "text"
 
 # Append a per-code count summary to the output.
 statistics = false
+
+# Path (relative to this file) of a baseline file to suppress; empty means none.
+baseline = ""
 """
 
 

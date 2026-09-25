@@ -154,7 +154,36 @@ def builtin_registrations() -> tuple[RuleRegistration, ...]:
             ),
             provider="flakeforge.builtin",
         ),
+        RuleRegistration(
+            code="X015",
+            description="Report unused `# noqa` directives.",
+            rule=CallbackRule(
+                "X015",
+                "Report unused `# noqa` directives.",
+                _check_unused_noqa,
+            ),
+            provider="flakeforge.builtin",
+        ),
     )
+
+
+def _check_unused_noqa(context: RuleContext) -> Iterable[RuleViolation]:
+    """X015: stub check for the engine-emitted unused-``# noqa`` rule.
+
+    Unlike every other built-in, X015 is *not* detected by walking the AST:
+    whether a ``# noqa`` suppressed anything depends on the outcome of every
+    other rule plus the engine-owned ``# noqa`` / ``per_file_ignores`` logic. The
+    engine therefore emits X015 itself in :func:`flakeforge.api.check_tree`
+    (repo convention: suppression and noqa handling are engine-owned, never
+    rule-owned). This registration exists so X015 takes part in registry
+    listing, ``select`` / ``ignore`` filtering, and duplicate-code detection like
+    any other built-in; its ``check`` yields nothing.
+
+    :param context: The module analysis context (unused).
+    :returns: An always-empty iterable of violations.
+    """
+    del context
+    return ()
 
 
 def _violation(context: RuleContext, node: ast.AST, code: str, message: str) -> RuleViolation:
