@@ -1,7 +1,7 @@
 # Task 06.0 - Scale & Distribution
 
 **Parent milestone:** [plan.md](../plan.md)
-**Status:** ⬜ Not started (proposed)
+**Status:** ⏸ Deferred (see [status.md](../status.md#notes--decisions))
 **Depends on:** [01.0](../01.0-standalone-cli-mode/README.md), [04.0](../04.0-ci-output-formats/README.md)
 
 ## Scope

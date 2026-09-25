@@ -11,9 +11,18 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 | 03.0 | Config Introspection & Bootstrap | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, CI `wheel-smoke` |
 | 04.0 | CI Output Formats                | ✅ Complete    | `test_api.py`, `test_cli.py`, `test_config.py`, `tests/golden/sarif_basic.json` |
 | 05.0 | Incremental Adoption             | ✅ Complete    | `test_baseline.py`, `test_noqa.py`, `test_config.py`, `test_api.py`, `test_cli.py`, `test_rules.py`, `test_flake8_plugin.py` |
-| 06.0 | Scale & Distribution             | ⬜ Not started | -     |
+| 06.0 | Scale & Distribution             | ⏸ Deferred     | -     |
 
-**Legend:** ✅ Complete · 🔶 In progress / partial · ⬜ Not started
+**Legend:** ✅ Complete · 🔶 In progress / partial · ⬜ Not started · ⏸ Deferred (ratified)
+
+**Milestone gate (2026-09-25): ✅ PASSED.** The required scope (01.0, 02.0) and optional tasks
+03.0-05.0 are complete; 06.0 is deferred. Gates run: `pytest --cov=flakeforge` 437 passed,
+coverage 93.85% (91.10% at start, so no drop); `ruff check .` clean; `flakeforge check
+--select X001,X009,X010 src` clean; `python -m build` produced the sdist and wheel; the
+`wheel-smoke` script ran locally against the built wheel and passed (it includes the 01.0/05
+standalone scenarios and the 02.0/04 precedence matrix); the security-auditor pass on 01.0/04
+has no open CRITICAL; README, `docs/architecture.md` and `docs/custom-rules.md` describe the
+as-built behavior; `/link-check` is clean. CI runs Python 3.11-3.14; the local gate used 3.12.
 
 ## Notes & decisions
 
@@ -47,6 +56,12 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   exits `2` with an error naming the pattern. Relative patterns, including `..` (e.g.
   `include = ["../src"]` from `project/config/`), stay allowed. This closes the CWE-22 LOW
   finding from the 01.0 review.
+
+- 2026-09-25 - **06.0 deferred (user ruling):** task 06.0 Scale & Distribution (`--jobs`, the
+  result cache, the pre-commit hook) is deferred without re-planning, as `plan.md` allows for the
+  proposed tasks. Its specs in `06.0-scale-and-distribution/` are unchanged and still describe
+  the intended work. When it's picked up, revisit the 01.0/04 `sys.modules` residue finding for
+  `--jobs` workers; the cache must fall back to a full check whenever it isn't sure.
 
 ## Task details
 
