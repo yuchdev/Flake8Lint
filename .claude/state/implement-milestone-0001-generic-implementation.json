@@ -51,13 +51,13 @@
     {
       "tt": "05.0",
       "slug": "incremental-adoption",
-      "status": "in_progress",
+      "status": "complete",
       "depends_on": [
         "02.0"
       ],
       "security_sensitive": false,
       "note": "needs D1, D2 ratified",
-      "subtasks_done": 2,
+      "subtasks_done": 3,
       "subtasks_total": 3
     },
     {
@@ -74,27 +74,7 @@
       "subtasks_total": 3
     }
   ],
-  "current_task": {
-    "task_folder": "docs/roadmap/0001-generic-implementation/05.0-incremental-adoption",
-    "subtask_queue": [
-      {
-        "nn": "01",
-        "slug": "per-file-ignores",
-        "status": "complete"
-      },
-      {
-        "nn": "02",
-        "slug": "baseline-file",
-        "status": "complete"
-      },
-      {
-        "nn": "03",
-        "slug": "unused-noqa",
-        "status": "not_started"
-      }
-    ],
-    "next_index": 2
-  },
+  "current_task": null,
   "research_digest": {
     "contracts_anchor": "plan.md#shared-contracts-authoritative",
     "contracts": [

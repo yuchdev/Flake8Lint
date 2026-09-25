@@ -1,7 +1,7 @@
 # Task 05.0 - Incremental Adoption
 
 **Parent milestone:** [plan.md](../plan.md)
-**Status:** 🔶 In progress
+**Status:** ✅ Complete
 **Depends on:** [02.0](../02.0-tool-mode-config-surfaces/README.md)
 
 ## Scope
@@ -15,7 +15,7 @@ and keep suppressions honest over time.
 |----|-------------------------------------------------|----------------|--------|
 | 01 | [`per_file_ignores`](01-per-file-ignores.md)    | ✅ Complete    | -      |
 | 02 | [Baseline file](02-baseline-file.md)            | ✅ Complete    | -      |
-| 03 | [Unused `# noqa` report](03-unused-noqa.md)     | ⬜ Not started | -      |
+| 03 | [Unused `# noqa` report](03-unused-noqa.md)     | ✅ Complete    | -      |
 
 ## Key constraints
 

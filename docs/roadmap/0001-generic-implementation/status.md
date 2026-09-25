@@ -10,7 +10,7 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
 | 02.0 | Tool-Mode Config Surfaces        | ✅ Complete    | `test_config.py`, `test_config_precedence.py`, `test_cli.py`, `test_api.py`, `test_discovery.py`, `test_noqa.py`, CI `wheel-smoke` |
 | 03.0 | Config Introspection & Bootstrap | ✅ Complete    | `test_cli.py`, `test_config.py`, `test_custom_rules.py`, CI `wheel-smoke` |
 | 04.0 | CI Output Formats                | ✅ Complete    | `test_api.py`, `test_cli.py`, `test_config.py`, `tests/golden/sarif_basic.json` |
-| 05.0 | Incremental Adoption             | 🔶 In progress (2/3 subtasks) | -     |
+| 05.0 | Incremental Adoption             | ✅ Complete    | `test_baseline.py`, `test_noqa.py`, `test_config.py`, `test_api.py`, `test_cli.py`, `test_rules.py`, `test_flake8_plugin.py` |
 | 06.0 | Scale & Distribution             | ⬜ Not started | -     |
 
 **Legend:** ✅ Complete · 🔶 In progress / partial · ⬜ Not started
@@ -181,3 +181,35 @@ Tracks progress against [plan.md](plan.md). Updated as each task lands.
   arguments": this holds for `check`, `config show` and `rules`. It is **not applicable** to
   `init`, which writes a new config and never reads or discovers one. Adding those flags would
   advertise behavior it doesn't have. There is an inline note in `build_parser`.
+
+### Task 05.0 - Incremental Adoption (✅ 2026-09-25)
+
+**Delivered**
+
+- 01: `per_file_ignores` (TOML table glob → code prefixes, `--per-file-ignores GLOB:CODE[,CODE]`
+  replaces the file's table). Globs are base-relative, and absolute globs or empty codes are
+  rejected. Applied in `api.py` after the rules run and before `# noqa`.
+- 02: a baseline file (`src/flakeforge/baseline.py`). `--write-baseline PATH` always exits `0`;
+  `--baseline PATH` or TOML `baseline` resolves relative to the config directory. The D2
+  fingerprint is `sha256(code␟path␟stripped line)` plus an occurrence index, so it survives
+  lines shifting. Stale entries show as a count (text) or a list (JSON) and never fail the
+  run. A malformed file, a non-regular file, a file over 64 MB, or a non-hex fingerprint exits `2`.
+- 03: built-in `X015` for an unused `# noqa` (D1), emitted by the engine in `api.py`. The
+  built-in-rule set of changes is complete: registry stub, samples, tests, and the docs range
+  updated to X001-X015. Coded entries for disabled rules are skipped. It is off when noqa is
+  inert, can't be suppressed by `# noqa` itself, can be baselined, isn't emitted through the
+  Flake8 adapter, and is on by default (called out in the CHANGELOG).
+
+**Tests / gate**
+
+- 353 → 437 tests, all passing. Coverage 93.85%. `ruff` is clean, and both the full and the CI
+  subset self-lint are clean.
+- `/verify-subtask`: 01 and 02 PASS; 03 checked by hand plus an in-session review.
+  security-auditor: PASS_WITH_FOLLOWUP, no CRITICAL. Fixed: baseline regular-file check, size
+  cap, and hex validation; empty `per_file_ignores` codes. The feature-reviewer agent couldn't
+  run (weekly usage limit), so the review was done in the main session. It found one defect,
+  now fixed with a test: X015 fired even when the registry had no X015
+  (`check_source(rules=[...])`). Emission is now gated on the registry.
+- Accepted: a config `baseline` may use a relative `..` path, consistent with the relative-`..`
+  ruling (a shared monorepo baseline). `--write-baseline` follows symlinks; the path is an
+  explicit operator argument.

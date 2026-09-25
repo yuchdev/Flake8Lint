@@ -878,6 +878,10 @@ def _unused_noqa_violations(
         return []
     if not _is_rule_enabled(UNUSED_NOQA_CODE, config):
         return []
+    # The registry is the source of truth for which rules exist: an explicit
+    # registry without X015 (e.g. ``check_source(rules=[...])``) emits none.
+    if not any(registration.code == UNUSED_NOQA_CODE for registration in registry.enabled_rules()):
+        return []
 
     known_codes = registry.known_codes()
     results: list[RuleViolation] = []

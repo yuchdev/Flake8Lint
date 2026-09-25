@@ -1,7 +1,7 @@
 # 03 - Unused `# noqa` report
 
 **Parent task:** [README.md](README.md)
-**Status:** ⬜ Not started
+**Status:** ✅ Complete
 **Blocked on:** decision D1 (plan.md)
 
 ## Requirements

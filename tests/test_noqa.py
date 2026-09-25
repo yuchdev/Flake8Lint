@@ -2,7 +2,7 @@ import ast
 import os
 from pathlib import Path
 
-from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_tree
+from flakeforge import RuleContext, RuleRegistry, RuleViolation, check_source, check_tree
 from flakeforge.config import LintConfig
 from flakeforge.registry import resolve_registry
 
@@ -293,4 +293,17 @@ def test_x015_can_be_dropped_by_per_file_ignores() -> None:
         ),
         registry=_REG,
     )
+    assert violations == ()
+
+
+def test_unused_noqa_not_emitted_when_registry_lacks_x015() -> None:
+    class NoPrintRule:
+        code = "ACME001"
+        description = "Do not call print()."
+
+        def check(self, context):
+            return ()
+
+    violations = check_source("value = 1  # noqa\n", rules=[NoPrintRule()])
+
     assert violations == ()
